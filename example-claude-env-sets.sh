@@ -5,7 +5,7 @@
 
 # List available environments (zsh array shown; bash array also works)
 typeset -a CLS_ENV_NAMES
-CLS_ENV_NAMES=( default anthropic anthropic_sandbox deepseek openrouter localdev )
+CLS_ENV_NAMES=( default anthropic deepseek openrouter )
 
 # Vars to clear on every switch (keep it minimal)
 typeset -a CLS_MANAGED_VARS
@@ -29,12 +29,6 @@ cls_apply_env() {
       # Production Anthropic API
       export ANTHROPIC_BASE_URL="https://api.anthropic.com"
       export ANTHROPIC_AUTH_TOKEN="sk-ant-REPLACE_ME_PROD"
-      ;;
-
-    anthropic_sandbox)
-      # Anthropic sandbox (example URL)
-      export ANTHROPIC_BASE_URL="https://api.sandbox.anthropic.com"
-      export ANTHROPIC_AUTH_TOKEN="sk-ant-REPLACE_ME_SANDBOX"
       ;;
 
     deepseek)
