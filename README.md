@@ -17,7 +17,6 @@ cp claude-env-sets.sh ~/.claude/claude-env-sets.sh
 # Edit ~/.claude/claude-env-sets.sh and replace placeholder tokens/URLs
 
 # Optional: customize (set in your shell rc before sourcing)
-# export CLAUDE_SHORTCUT=cls              # set empty to disable the `cls` alias
 # export CLAUDE_ENV_DEFAULT=default       # name of the default environment
 # export CLAUDE_ENV_FILE=~/.claude/claude-env-sets.sh  # single path override
 ```
@@ -25,22 +24,21 @@ cp claude-env-sets.sh ~/.claude/claude-env-sets.sh
 ## Use it
 
 ```bash
-clsenv list # show environments (from claude-env-sets.sh)
-clsenv       # with fzf installed: interactive menu to pick a command
-clsenv use   # with fzf installed: interactive env picker (includes --local)
-clsenv -e ./project/claude-env-sets.sh list # use a custom config path just for this shell
-clsenv use anthropic # switch current shell
-clsenv --local use anthropic # switch only this shell (do not persist)
-clsenv show # print managed vars (masked)
-clsenv reload # re-exec Zsh and re-read rc files
-clsenv clear # return to empty default
-cls "Hello" # runs the 'claude' CLI via the 'cls' shortcut
+ccenv list # show environments (from claude-env-sets.sh)
+ccenv       # with fzf installed: interactive menu to pick a command
+ccenv use   # with fzf installed: interactive env picker (includes --local)
+ccenv -e ./project/claude-env-sets.sh list # use a custom config path just for this shell
+ccenv use anthropic # switch current shell
+ccenv --local use anthropic # switch only this shell (do not persist)
+ccenv show # print managed vars (masked)
+ccenv reload # re-exec Zsh and re-read rc files
+ccenv clear # return to empty default
 ```
 
 ### Options
 
 ```text
-clsenv [--env-file <path>] [--local] <command> [args]
+ccenv [--env-file <path>] [--local] <command> [args]
 
 Commands:
   list                 Show available env names
@@ -58,11 +56,11 @@ Flags:
 ### fzf-powered interactive mode
 
 - Requirements: `fzf` installed and running in a TTY.
-- `clsenv` with no args opens an interactive menu of commands (simplified; local toggles live inside `use`).
-- `clsenv use` with no args opens an interactive picker of environments. For each non-default env you’ll see both the normal and `--local` (dimmed “do not persist”) options. After selection, it prints the chosen environment.
+- `ccenv` with no args opens an interactive menu of commands (simplified; local toggles live inside `use`).
+- `ccenv use` with no args opens an interactive picker of environments. For each non-default env you'll see both the normal and `--local` (dimmed "do not persist") options. After selection, it prints the chosen environment.
 - Selecting `list` from the interactive menu prints the environments (no fzf selection).
 
 ### Local vs. persistent switches
 
-- Persistent (default): `clsenv use <name>` writes the chosen env to a state file next to the script, so new shells start with that env.
-- Local only: `clsenv --local use <name>` affects only the current shell and does not change the saved state. This also works with reload, e.g. `clsenv -l reload <name>`.
+- Persistent (default): `ccenv use <name>` writes the chosen env to a state file next to the script, so new shells start with that env.
+- Local only: `ccenv --local use <name>` affects only the current shell and does not change the saved state. This also works with reload, e.g. `ccenv -l reload <name>`.
