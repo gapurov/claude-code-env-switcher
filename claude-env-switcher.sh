@@ -9,65 +9,89 @@
 #   - cls_apply_env <name>   : required function; returns non‑zero if unknown
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
-: "${CLAUDE_ENV_DEFAULT:=default}"        # startup env
-: "${CLAUDE_CLI_BIN:=claude}"             # the actual CLI to run
-: "${CLAUDE_SHORTCUT:=cls}"               # set "" to disable the shortcut
-# CLAUDE_ENV_FILE may be an array (preferred) or a space-separated string.
-# First existing file wins. If unset, we’ll look at ./claude-env-sets.sh
-: "${CLAUDE_ENV_FILE:=./claude-env-sets.sh}"
+# Default environment name when none is active
+: "${CLAUDE_ENV_DEFAULT:=default}"
+
+# Shortcut function name to run your CLI (calls 'claude')
+: "${CLAUDE_SHORTCUT:=cls}"
+
+# Default config path: single file next to this script; overridable.
+cls__script_dir() {
+  local src=""
+  if [ -n "${BASH_VERSION:-}" ] && [ -n "${BASH_SOURCE[0]+x}" ]; then
+    src="${BASH_SOURCE[0]}"
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    eval 'src=${funcfiletrace[1]%:*}' 2>/dev/null || src=""
+    [ -z "$src" ] && eval 'src=${(%):-%N}'
+  else
+    src="$0"
+  fi
+  case "$src" in "~"*) src="${HOME}${src#\~}";; esac
+  printf '%s\n' "$(cd -P -- "$(dirname -- "$src")" 2>/dev/null && pwd)"
+}
+
+cls__default_env_file() {
+  printf '%s/claude-env-sets.sh' "$(cls__script_dir)"
+}
+
+cls__expand_tilde() {DDDDD
+  case "$1" in "~"*) printf '%s\n' "${HOME}${1#\~}";; *) printf '%s\n' "$1";; esac
+}
+
+# Resolve env file with precedence: CLI > env var > default
+cls__resolve_env_file() {
+  local candidate
+  if [ -n "${CLS_ENV_FILE_CLI:-}" ]; then
+    candidate="$CLS_ENV_FILE_CLI"
+  elif [ -n "${CLAUDE_ENV_FILE:-}" ]; then
+    candidate="$CLAUDE_ENV_FILE"
+  else
+    candidate="$(cls__default_env_file)"
+  fi
+  candidate="$(cls__expand_tilde "$candidate")"
+  printf '%s\n' "$candidate"
+}
+
 # -----------------------------------------------------------------------------
 
 
 # --- helpers -----------------------------------------------------------------
 cls__err() { printf 'clsenv: %s\n' "$*" >&2; return 1; }
 
-# Iterate over values of CLAUDE_ENV_FILE supporting zsh/bash arrays or strings.
-cls__each_envfile() {
-  local printed=0 f
-  if [ -n "${ZSH_VERSION:-}" ]; then
-    if typeset -p CLAUDE_ENV_FILE 2>/dev/null | grep -q 'typeset -a'; then
-      # zsh array
-      eval 'for f in "${CLAUDE_ENV_FILE[@]}"; do printf "%s\n" "$f"; done'
-      printed=1
-    fi
-  fi
-  if [ "$printed" -eq 0 ] && [ -n "${BASH_VERSION:-}" ]; then
-    if declare -p CLAUDE_ENV_FILE 2>/dev/null | grep -q 'declare \-a'; then
-      # bash array
-      eval 'for f in "${CLAUDE_ENV_FILE[@]}"; do printf "%s\n" "$f"; done'
-      printed=1
-    fi
-  fi
-  if [ "$printed" -eq 0 ] && [ -n "${CLAUDE_ENV_FILE:-}" ]; then
-    # whitespace-separated fallback
-    for f in $CLAUDE_ENV_FILE; do printf "%s\n" "$f"; done
-  fi
-}
-
-# Pick first existing config path; memoize as CLS_ENV_FILE_PICKED.
-cls__pick_envfile() {
-  if [ -n "${CLS_ENV_FILE_PICKED:-}" ] && [ -f "$CLS_ENV_FILE_PICKED" ]; then
-    printf '%s' "$CLS_ENV_FILE_PICKED"; return 0
-  fi
-  local f
-  # candidates: user-provided list, then the default
-  while IFS= read -r f; do
-    case "$f" in "~"*) f="${HOME}${f#\~}";; esac
-    [ -f "$f" ] || continue
-    CLS_ENV_FILE_PICKED="$f"
-    printf '%s' "$f"
-    return 0
-  done <<EOF
-$(cls__each_envfile)
-$HOME/.claude/claude-env-sets.sh
-EOF
-  return 1
-}
 
 cls__source_envfile() {
-  if cls__pick_envfile >/dev/null 2>&1; then
-    # shellcheck disable=SC1090
-    . "$CLS_ENV_FILE_PICKED"
+  local env_file
+  env_file="$(cls__resolve_env_file)"
+  if [ -r "$env_file" ]; then
+    CLS_ENV_FILE_PICKED="$env_file"
+    # Ensure config-declared variables/functions land in the global scope.
+    # In both zsh and bash, 'typeset/declare' inside a function creates locals,
+    # which would be discarded on return. Temporarily wrap to force globals.
+    if [ -n "${ZSH_VERSION:-}" ]; then
+      setopt aliases 2>/dev/null || true
+      alias typeset='typeset -g' 2>/dev/null || true
+      # shellcheck disable=SC1090
+      . "$env_file"
+      unalias typeset 2>/dev/null || true
+    elif [ -n "${BASH_VERSION:-}" ]; then
+      if declare -g __probe 2>/dev/null; then
+        unset __probe
+        typeset() { builtin declare -g "$@"; }
+        # shellcheck disable=SC1090
+        . "$env_file"
+        unset -f typeset 2>/dev/null || true
+      else
+        # Older bash without -g: neutralize 'typeset' so assignments are global
+        typeset() { :; }
+        # shellcheck disable=SC1090
+        . "$env_file"
+        unset -f typeset 2>/dev/null || true
+      fi
+    else
+      # Fallback: plain source
+      # shellcheck disable=SC1090
+      . "$env_file"
+    fi
   fi
 }
 
@@ -136,7 +160,7 @@ cls__use() {
 
   if [ "$name" != "default" ]; then
     if ! command -v cls_apply_env >/dev/null 2>&1; then
-      cls__err "missing cls_apply_env in config: $(cls__pick_envfile 2>/dev/null || printf '?')"
+      cls__err "missing cls_apply_env in config: $(cls__resolve_env_file 2>/dev/null || printf '?')"
       return 1
     fi
     if ! cls_apply_env "$name"; then
@@ -197,6 +221,21 @@ cls__show() {
 }
 
 clsenv() {
+  # Optional global options parsed before the command
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --env-file=*) CLS_ENV_FILE_CLI="${1#*=}"; export CLAUDE_ENV_FILE="$CLS_ENV_FILE_CLI"; shift ;;
+      --env-file|-e)
+        if [ -n "${2:-}" ]; then
+          CLS_ENV_FILE_CLI="$2"; export CLAUDE_ENV_FILE="$CLS_ENV_FILE_CLI"; shift 2
+        else
+          cls__err "missing path after $1"; return 2
+        fi ;;
+      --) shift; break ;;
+      -*) break ;;
+      *) break ;;
+    esac
+  done
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
     list)      cls__list ;;
@@ -207,7 +246,7 @@ clsenv() {
     clear|default) cls__use default ;;
     help|-h|--help)
       cat <<'EOF'
-Usage: clsenv <command> [args]
+Usage: clsenv [--env-file <path>] <command> [args]
 
   list                 # show available env names (from config)
   use <name>           # switch current shell to this env
@@ -215,17 +254,32 @@ Usage: clsenv <command> [args]
   show                 # print managed vars (masked for secrets)
   current              # print active env name
   clear|default        # switch to the empty default env
+\nOptions:
+  -e, --env-file <path>   use a specific claude-env-sets.sh (overrides env var)
 EOF
       ;;
     *) cls__err "unknown command: $cmd (see clsenv help)"; return 1 ;;
   esac
 }
 
-# Optional CLI shortcut: 'cls' → $CLAUDE_CLI_BIN
+# Preload the config once at top level so arrays/functions declared with
+# 'typeset' become global in shells that lack 'declare -g' (e.g., bash 3.2).
+if [ -z "${CLS_ENV_FILE_PICKED:-}" ]; then
+  env_file_preload="$(cls__resolve_env_file)"
+  if [ -r "$env_file_preload" ]; then
+    CLS_ENV_FILE_PICKED="$env_file_preload"
+    # shellcheck disable=SC1090
+    . "$env_file_preload"
+  fi
+fi
+
+# Optional CLI shortcut: 'cls' → claude
 cls__maybe_shortcut() {
-  [ -z "$CLAUDE_SHORTCUT" ] && return 0
-  if command -v "$CLAUDE_SHORTCUT" >/dev/null 2>&1; then return 0; fi
-  eval "${CLAUDE_SHORTCUT}(){ command \"${CLAUDE_CLI_BIN}\" \"\$@\"; }"
+  # Create a convenience shortcut to the 'claude' CLI if requested.
+  local shortcut="${CLAUDE_SHORTCUT:-cls}"
+  [ -n "$shortcut" ] || return 0
+  if command -v "$shortcut" >/dev/null 2>&1; then return 0; fi
+  eval "${shortcut}(){ command claude \"\$@\"; }"
 }
 cls__maybe_shortcut
 

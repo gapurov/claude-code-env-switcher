@@ -16,19 +16,20 @@ echo '[[ -r ~/.claude/claude-env-switcher.sh ]] && source ~/.claude/claude-env-s
 cp claude-env-sets.sh ~/.claude/claude-env-sets.sh
 # Edit ~/.claude/claude-env-sets.sh and replace placeholder tokens/URLs
 
-# Optional: customize
-# export CLAUDE_ENV_FILE=(./claude-env-sets.sh ~/.claude/claude-env-sets.sh)
-# export CLAUDE_CLI_BIN=claude   # real CLI to run via `cls`
-# export CLAUDE_SHORTCUT=cls     # set empty to disable the shortcut
+# Optional: customize (set in your shell rc before sourcing)
+# export CLAUDE_SHORTCUT=cls              # set empty to disable the `cls` alias
+# export CLAUDE_ENV_DEFAULT=default       # name of the default environment
+# export CLAUDE_ENV_FILE=~/.claude/claude-env-sets.sh  # single path override
 ```
 
 ## Use it
 
 ```bash
 clsenv list # show environments (from claude-env-sets.sh)
+clsenv -e ./project/claude-env-sets.sh list # use a custom config path just for this shell
 clsenv use anthropic # switch current shell
 clsenv show # print managed vars (masked)
 clsenv reload # re-exec Zsh and re-read rc files
 clsenv clear # return to empty default
-cls "Hello" # run your CLI via the 'cls' shortcut
+cls "Hello" # runs the 'claude' CLI via the 'cls' shortcut
 ```
