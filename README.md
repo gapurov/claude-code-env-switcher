@@ -1,4 +1,4 @@
-# claude-env-switcher
+# claude-code-env-switcher
 
 ## Installation
 
@@ -7,27 +7,27 @@ Source the switcher in your shell rc and create a config file with your environm
 ```bash
 # Put the script somewhere (example):
 mkdir -p ~/.claude
-cp claude-env-switcher.sh ~/.claude/
+cp claude-code-env-switcher.sh ~/.claude/
 
 # Source it from your shell rc (zsh shown; bash uses ~/.bashrc):
-echo '[[ -r ~/.claude/claude-env-switcher.sh ]] && source ~/.claude/claude-env-switcher.sh' >> ~/.zshrc
+echo '[[ -r ~/.claude/claude-code-env-switcher.sh ]] && source ~/.claude/claude-code-env-switcher.sh' >> ~/.zshrc
 
-# Create your env config (recommended global path; project-local ./claude-env-sets.sh also works):
-cp claude-env-sets.sh ~/.claude/claude-env-sets.sh
-# Edit ~/.claude/claude-env-sets.sh and replace placeholder tokens/URLs
+# Create your env config (recommended global path; project-local ./claude-code-env-sets.sh also works):
+cp claude-code-env-sets.sh ~/.claude/claude-code-env-sets.sh
+# Edit ~/.claude/claude-code-env-sets.sh and replace placeholder tokens/URLs
 
 # Optional: customize (set in your shell rc before sourcing)
 # export CLAUDE_ENV_DEFAULT=default       # name of the default environment
-# export CLAUDE_ENV_FILE=~/.claude/claude-env-sets.sh  # single path override
+# export CLAUDE_ENV_FILE=~/.claude/claude-code-env-sets.sh  # single path override
 ```
 
 ## Use it
 
 ```bash
-ccenv list # show environments (from claude-env-sets.sh)
+ccenv list # show environments (from claude-code-env-sets.sh)
 ccenv       # with fzf installed: interactive menu to pick a command
 ccenv use   # with fzf installed: interactive env picker (includes --local)
-ccenv -e ./project/claude-env-sets.sh list # use a custom config path just for this shell
+ccenv -e ./project/claude-code-env-sets.sh list # use a custom config path just for this shell
 ccenv use anthropic # switch current shell
 ccenv --local use anthropic # switch only this shell (do not persist)
 ccenv show # print managed vars (masked)
@@ -49,7 +49,7 @@ Commands:
   clear|default        Switch to the empty default env
 
 Flags:
-  -e, --env-file <path>  Use a specific claude-env-sets.sh for this shell
+  -e, --env-file <path>  Use a specific claude-code-env-sets.sh for this shell
   -l, --local            Do not persist the change; only affect current shell
 ```
 

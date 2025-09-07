@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# User environment definitions for claude-env-switcher
+# User environment definitions for claude-code-env-switcher
 # Replace the placeholder tokens/URLs below with your real values when ready.
 
 # List available environments (zsh array shown; bash array also works)

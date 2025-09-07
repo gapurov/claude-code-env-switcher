@@ -7,7 +7,7 @@
 # --local (-l) applies the change only to the current shell session and
 # does not persist it to the state file used by new shells.
 #
-# The config (claude-env-sets.sh) provides:
+# The config (claude-code-env-sets.sh) provides:
 #   - CLS_ENV_NAMES          : list/array of available env names
 #   - CLS_MANAGED_VARS       : list/array of vars to clear on switch
 #   - cls_env_globals()      : optional hook run before each env apply
@@ -34,11 +34,11 @@ cc__script_dir() {
 }
 
 cc__default_env_file() {
-  printf '%s/claude-env-sets.sh' "$(cc__script_dir)"
+  printf '%s/claude-code-env-sets.sh' "$(cc__script_dir)"
 }
 
 cc__state_file() {
-  printf '%s/.claude-env-state' "$(cc__script_dir)"
+  printf '%s/.claude-code-env-state' "$(cc__script_dir)"
 }
 
 cc__expand_tilde() {
@@ -421,7 +421,7 @@ Usage: ccenv [--env-file <path>] [--local] <command> [args]
   current              # print active env name
   clear|default        # switch to the empty default env
 \nOptions:
-  -e, --env-file <path>   use a specific claude-env-sets.sh (overrides env var)
+  -e, --env-file <path>   use a specific claude-code-env-sets.sh (overrides env var)
   -l, --local             do not persist change; affects only current shell
 EOF
       ;;

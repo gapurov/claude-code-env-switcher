@@ -1,2 +1,7 @@
+# Legacy patterns (for safety)
 claude-env-sets.sh
 .claude-env-state
+
+# Current patterns
+claude-code-env-sets.sh
+.claude-code-env-state
