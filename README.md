@@ -53,7 +53,7 @@ Flags:
 
 ### fzf-powered interactive mode (optional)
 
-- Requirements: `fzf` installed and running in a TTY.
+- if `fzf` is installed and running in a TTY, `ccenv` will open an interactive menu.
 - `ccenv` with no args opens an interactive menu of commands (simplified; local toggles live inside `use`).
 - `ccenv use` with no args opens an interactive picker of environments. For each non-default env you'll see both the normal and `--local` (do not persist) options. After selection, it prints the chosen environment.
 - Selecting `list` from the interactive menu prints the environments (no fzf selection).
