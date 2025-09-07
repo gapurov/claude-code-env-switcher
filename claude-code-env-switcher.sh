@@ -8,10 +8,10 @@
 # does not persist it to the state file used by new shells.
 #
 # The config (claude-code-env-sets.sh) provides:
-#   - CLS_ENV_NAMES          : list/array of available env names
-#   - CLS_MANAGED_VARS       : list/array of vars to clear on switch
-#   - cls_env_globals()      : optional hook run before each env apply
-#   - cls_apply_env <name>   : required function; returns non‑zero if unknown
+#   - CCENV_ENV_NAMES        : list/array of available env names
+#   - CCENV_MANAGED_VARS     : list/array of vars to clear on switch
+#   - ccenv_globals()        : optional hook run before each env apply
+#   - ccenv_apply_env <name> : required function; returns non‑zero if unknown
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
 # Default environment name when none is active
@@ -48,8 +48,8 @@ cc__expand_tilde() {
 # Resolve env file with precedence: CLI > env var > default
 cc__resolve_env_file() {
   local candidate
-  if [ -n "${CLS_ENV_FILE_CLI:-}" ]; then
-    candidate="$CLS_ENV_FILE_CLI"
+  if [ -n "${CCENV_ENV_FILE_CLI:-}" ]; then
+    candidate="$CCENV_ENV_FILE_CLI"
   elif [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     candidate="$CLAUDE_ENV_FILE"
   else
@@ -70,7 +70,7 @@ cc__source_envfile() {
   local env_file
   env_file="$(cc__resolve_env_file)"
   if [ -r "$env_file" ]; then
-    CLS_ENV_FILE_PICKED="$env_file"
+    CCENV_ENV_FILE_PICKED="$env_file"
     # Ensure config-declared variables/functions land in the global scope.
     # In both zsh and bash, 'typeset/declare' inside a function creates locals,
     # which would be discarded on return. Temporarily wrap to force globals.
@@ -163,9 +163,9 @@ EOF
   esac
   [ -z "$name" ] && return 0
   if [ "$make_local" -eq 1 ]; then
-    CLS_LOCAL_ONLY=1 cc__use "$name" && printf 'switched to %s (local)\n' "$name"
+    CCENV_LOCAL_ONLY=1 cc__use "$name" && printf 'switched to %s (local)\n' "$name"
   else
-    CLS_LOCAL_ONLY=0 cc__use "$name" && printf 'switched to %s\n' "$name"
+    CCENV_LOCAL_ONLY=0 cc__use "$name" && printf 'switched to %s\n' "$name"
   fi
 }
 
@@ -197,7 +197,7 @@ cc__interactive_root() {
     current*) printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
     reload*) cc__reload ;;
     'show') cc__show ;;
-    clear*) CLS_LOCAL_ONLY=0 cc__use default ;;
+    clear*) CCENV_LOCAL_ONLY=0 cc__use default ;;
     *) return 0 ;;
   esac
 }
@@ -211,46 +211,45 @@ cc__mask() {
   printf '%s…%s' "$first" "$last"
 }
 
-# Iterate over CLS_ENV_NAMES (array or string) yielding one name per line
 cc__each_envname() {
   local n printed=0
   if [ -n "${ZSH_VERSION:-}" ]; then
     local decl
-    decl=$(typeset -p CLS_ENV_NAMES 2>/dev/null || true)
+    decl=$(typeset -p CCENV_ENV_NAMES 2>/dev/null || true)
     case "$decl" in
-      *"typeset -a"*) eval 'for n in "${CLS_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
+      *"typeset -a"*) eval 'for n in "${CCENV_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
     esac
   elif [ -n "${BASH_VERSION:-}" ]; then
     local decl
-    decl=$(declare -p CLS_ENV_NAMES 2>/dev/null || true)
+    decl=$(declare -p CCENV_ENV_NAMES 2>/dev/null || true)
     case "$decl" in
-      *"declare -a"*) eval 'for n in "${CLS_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
+      *"declare -a"*) eval 'for n in "${CCENV_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
     esac
   fi
-  if [ "$printed" -eq 0 ] && [ -n "${CLS_ENV_NAMES:-}" ]; then
-    for n in $CLS_ENV_NAMES; do printf '%s\n' "$n"; done
+  if [ "$printed" -eq 0 ] && [ -n "${CCENV_ENV_NAMES:-}" ]; then
+    for n in $CCENV_ENV_NAMES; do printf '%s\n' "$n"; done
   fi
 }
 
 # Clear vars declared as managed in the config.
 cc__unset_managed() {
-  [ -z "${CLS_MANAGED_VARS:-}" ] && return 0
+  if [ -z "${CCENV_MANAGED_VARS:-}" ]; then return 0; fi
   local v printed=0
   if [ -n "${ZSH_VERSION:-}" ]; then
     local decl
-    decl=$(typeset -p CLS_MANAGED_VARS 2>/dev/null || true)
+    decl=$(typeset -p CCENV_MANAGED_VARS 2>/dev/null || true)
     case "$decl" in
-      *"typeset -a"*) eval 'for v in "${CLS_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
+      *"typeset -a"*) eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
     esac
   elif [ -n "${BASH_VERSION:-}" ] ; then
     local decl
-    decl=$(declare -p CLS_MANAGED_VARS 2>/dev/null || true)
+    decl=$(declare -p CCENV_MANAGED_VARS 2>/dev/null || true)
     case "$decl" in
-      *"declare -a"*) eval 'for v in "${CLS_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
+      *"declare -a"*) eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
     esac
   fi
   if [ "$printed" -eq 0 ]; then
-    for v in $CLS_MANAGED_VARS; do unset "$v"; done
+    for v in $CCENV_MANAGED_VARS; do unset "$v"; done
   fi
 }
 
@@ -278,7 +277,7 @@ cc__list() {
   cc__source_envfile
   local active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" n
   [ "$active" = "default" ] && printf '* default\n' || printf '  default\n'
-  if [ -n "${CLS_ENV_NAMES:-}" ]; then
+  if [ -n "${CCENV_ENV_NAMES:-}" ]; then
     # show config-declared names; keep user order
     while IFS= read -r n; do
       [ -z "$n" ] && continue
@@ -298,22 +297,19 @@ cc__use() {
   cc__unset_managed
 
   # optional globals hook
-  if command -v cls_env_globals >/dev/null 2>&1; then cls_env_globals || true; fi
+  if command -v ccenv_globals >/dev/null 2>&1; then ccenv_globals || true; fi
 
   if [ "$name" != "default" ]; then
-    if ! command -v cls_apply_env >/dev/null 2>&1; then
-      cc__err "missing cls_apply_env in config: $(cc__resolve_env_file 2>/dev/null || printf '?')"
+    if ! command -v ccenv_apply_env >/dev/null 2>&1; then
+      cc__err "missing ccenv_apply_env in config: $(cc__resolve_env_file 2>/dev/null || printf '?')"
       return 1
     fi
-    if ! cls_apply_env "$name"; then
-      cc__err "unknown env '$name' (see: ccenv list)"
-      return 1
-    fi
+    ccenv_apply_env "$name" || { cc__err "unknown env '$name' (see: ccenv list)"; return 1; }
   fi
 
   export CLAUDE_ENV_ACTIVE="$name"
   # Save the state for future shell invocations unless --local was used
-  if [ "${CLS_LOCAL_ONLY:-0}" != "1" ]; then
+  if [ "${CCENV_LOCAL_ONLY:-0}" != "1" ]; then
     cc__save_state "$name"
   fi
 }
@@ -328,17 +324,17 @@ cc__reload() {
 
 cc__show() {
   printf 'active: %s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  if [ -z "${CLS_MANAGED_VARS:-}" ]; then
-    printf '  (no CLS_MANAGED_VARS configured)\n'
+  if [ -z "${CCENV_MANAGED_VARS:-}" ]; then
+    printf '  (no CCENV_MANAGED_VARS configured)\n'
     return 0
   fi
   local v val
   # Iterate vars either as array or string
   if [ -n "${ZSH_VERSION:-}" ]; then
     local decl
-    decl=$(typeset -p CLS_MANAGED_VARS 2>/dev/null || true)
+    decl=$(typeset -p CCENV_MANAGED_VARS 2>/dev/null || true)
     case "$decl" in *"typeset -a"*)
-    eval 'for v in "${CLS_MANAGED_VARS[@]}"; do
+    eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do
       val=$(eval "printf %s \"\${$v-}\"")
       if [ -n "$val" ]; then
         case "$v" in *KEY*|*TOKEN*|*SECRET*) printf "  %s=" "$v"; cc__mask "$val"; printf "\n";;
@@ -347,12 +343,13 @@ cc__show() {
     done'
     return 0 ;;
     esac
+    # no array; fall through to string fallback
   fi
   if [ -n "${BASH_VERSION:-}" ]; then
     local decl
-    decl=$(declare -p CLS_MANAGED_VARS 2>/dev/null || true)
+    decl=$(declare -p CCENV_MANAGED_VARS 2>/dev/null || true)
     case "$decl" in *"declare -a"*)
-    eval 'for v in "${CLS_MANAGED_VARS[@]}"; do
+    eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do
       val=$(eval "printf %s \"\${$v-}\"")
       if [ -n "$val" ]; then
         case "$v" in *KEY*|*TOKEN*|*SECRET*) printf "  %s=" "$v"; cc__mask "$val"; printf "\n";;
@@ -361,9 +358,10 @@ cc__show() {
     done'
     return 0 ;;
     esac
+    # no array; fall through to string fallback
   fi
   # string fallback
-  for v in $CLS_MANAGED_VARS; do
+  for v in ${CCENV_MANAGED_VARS}; do
     val=$(eval "printf %s \"\${$v-}\"")
     if [ -n "$val" ]; then
       case "$v" in *KEY*|*TOKEN*|*SECRET*) printf '  %s=' "$v"; cc__mask "$val"; printf '\n';;
@@ -376,18 +374,18 @@ cc__show() {
 
 ccenv() {
   # Optional global options parsed before the command
-  CLS_LOCAL_ONLY=0
+  CCENV_LOCAL_ONLY=0
   while [ $# -gt 0 ]; do
     case "$1" in
-      --env-file=*) CLS_ENV_FILE_CLI="${1#*=}"; export CLAUDE_ENV_FILE="$CLS_ENV_FILE_CLI"; shift ;;
+      --env-file=*) CCENV_ENV_FILE_CLI="${1#*=}"; export CLAUDE_ENV_FILE="$CCENV_ENV_FILE_CLI"; shift ;;
       --env-file|-e)
         if [ -n "${2:-}" ]; then
-          CLS_ENV_FILE_CLI="$2"; export CLAUDE_ENV_FILE="$CLS_ENV_FILE_CLI"; shift 2
+          CCENV_ENV_FILE_CLI="$2"; export CLAUDE_ENV_FILE="$CCENV_ENV_FILE_CLI"; shift 2
         else
           cc__err "missing path after $1"; return 2
         fi ;;
       --local|-l)
-        CLS_LOCAL_ONLY=1; shift ;;
+        CCENV_LOCAL_ONLY=1; shift ;;
       --) shift; break ;;
       -*) break ;;
       *) break ;;

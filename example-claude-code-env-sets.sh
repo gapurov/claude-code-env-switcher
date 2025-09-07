@@ -4,21 +4,21 @@
 # Replace the placeholder tokens/URLs below with your real values when ready.
 
 # List available environments (zsh array shown; bash array also works)
-typeset -a CLS_ENV_NAMES
-CLS_ENV_NAMES=( default anthropic deepseek openrouter )
+typeset -a CCENV_ENV_NAMES
+CCENV_ENV_NAMES=( default anthropic deepseek openrouter )
 
 # Vars to clear on every switch (keep it minimal)
-typeset -a CLS_MANAGED_VARS
-CLS_MANAGED_VARS=( ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL )
+typeset -a CCENV_MANAGED_VARS
+CCENV_MANAGED_VARS=( ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL )
 
 # Optional globals applied for every env before the specific env
-cls_env_globals() {
+ccenv_globals() {
   : "${API_TIMEOUT_MS:=600000}"
   export API_TIMEOUT_MS
 }
 
 # Apply an environment by name. Return non-zero for unknown.
-cls_apply_env() {
+ccenv_apply_env() {
   case "$1" in
     default)
       # leave everything cleared (baseline)
