@@ -34,6 +34,10 @@ cls__default_env_file() {
   printf '%s/claude-env-sets.sh' "$(cls__script_dir)"
 }
 
+cls__state_file() {
+  printf '%s/.claude-env-state' "$(cls__script_dir)"
+}
+
 cls__expand_tilde() {
   case "$1" in "~"*) printf '%s\n' "${HOME}${1#\~}";; *) printf '%s\n' "$1";; esac
 }
@@ -68,11 +72,17 @@ cls__source_envfile() {
     # In both zsh and bash, 'typeset/declare' inside a function creates locals,
     # which would be discarded on return. Temporarily wrap to force globals.
     if [ -n "${ZSH_VERSION:-}" ]; then
+      # Preserve and temporarily enable alias expansion so our 'typeset' alias
+      # works, then restore the previous state to avoid altering the user's
+      # shell options.
+      local had_aliases=0
+      if [[ -o aliases ]]; then had_aliases=1; fi
       setopt aliases 2>/dev/null || true
       alias typeset='typeset -g' 2>/dev/null || true
       # shellcheck disable=SC1090
       . "$env_file"
       unalias typeset 2>/dev/null || true
+      if [ "$had_aliases" -eq 0 ]; then unsetopt aliases 2>/dev/null || true; fi
     elif [ -n "${BASH_VERSION:-}" ]; then
       if declare -g __probe 2>/dev/null; then
         unset __probe
@@ -107,10 +117,18 @@ cls__mask() {
 # Iterate over CLS_ENV_NAMES (array or string) yielding one name per line
 cls__each_envname() {
   local n printed=0
-  if [ -n "${ZSH_VERSION:-}" ] && typeset -p CLS_ENV_NAMES 2>/dev/null | grep -q 'typeset -a'; then
-    eval 'for n in "${CLS_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1
-  elif [ -n "${BASH_VERSION:-}" ] && declare -p CLS_ENV_NAMES 2>/dev/null | grep -q 'declare \-a'; then
-    eval 'for n in "${CLS_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    local decl
+    decl=$(typeset -p CLS_ENV_NAMES 2>/dev/null || true)
+    case "$decl" in
+      *"typeset -a"*) eval 'for n in "${CLS_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
+    esac
+  elif [ -n "${BASH_VERSION:-}" ]; then
+    local decl
+    decl=$(declare -p CLS_ENV_NAMES 2>/dev/null || true)
+    case "$decl" in
+      *"declare -a"*) eval 'for n in "${CLS_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
+    esac
   fi
   if [ "$printed" -eq 0 ] && [ -n "${CLS_ENV_NAMES:-}" ]; then
     for n in $CLS_ENV_NAMES; do printf '%s\n' "$n"; done
@@ -121,13 +139,40 @@ cls__each_envname() {
 cls__unset_managed() {
   [ -z "${CLS_MANAGED_VARS:-}" ] && return 0
   local v printed=0
-  if [ -n "${ZSH_VERSION:-}" ] && typeset -p CLS_MANAGED_VARS 2>/dev/null | grep -q 'typeset -a'; then
-    eval 'for v in "${CLS_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1
-  elif [ -n "${BASH_VERSION:-}" ] && declare -p CLS_MANAGED_VARS 2>/dev/null | grep -q 'declare \-a'; then
-    eval 'for v in "${CLS_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    local decl
+    decl=$(typeset -p CLS_MANAGED_VARS 2>/dev/null || true)
+    case "$decl" in
+      *"typeset -a"*) eval 'for v in "${CLS_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
+    esac
+  elif [ -n "${BASH_VERSION:-}" ] ; then
+    local decl
+    decl=$(declare -p CLS_MANAGED_VARS 2>/dev/null || true)
+    case "$decl" in
+      *"declare -a"*) eval 'for v in "${CLS_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
+    esac
   fi
   if [ "$printed" -eq 0 ]; then
     for v in $CLS_MANAGED_VARS; do unset "$v"; done
+  fi
+}
+
+# Save the current environment to the state file
+cls__save_state() {
+  local env_name="$1"
+  local state_file
+  state_file="$(cls__state_file)"
+  printf '%s\n' "$env_name" > "$state_file"
+}
+
+# Load the saved environment from the state file
+cls__load_state() {
+  local state_file
+  state_file="$(cls__state_file)"
+  if [ -r "$state_file" ]; then
+    local _s
+    IFS= read -r _s < "$state_file" || true
+    [ -n "${_s+x}" ] && printf '%s\n' "$_s"
   fi
 }
 
@@ -170,6 +215,8 @@ cls__use() {
   fi
 
   export CLAUDE_ENV_ACTIVE="$name"
+  # Save the state for future shell invocations
+  cls__save_state "$name"
 }
 
 cls__reload() {
@@ -188,7 +235,10 @@ cls__show() {
   fi
   local v val
   # Iterate vars either as array or string
-  if [ -n "${ZSH_VERSION:-}" ] && typeset -p CLS_MANAGED_VARS 2>/dev/null | grep -q 'typeset -a'; then
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    local decl
+    decl=$(typeset -p CLS_MANAGED_VARS 2>/dev/null || true)
+    case "$decl" in *"typeset -a"*)
     eval 'for v in "${CLS_MANAGED_VARS[@]}"; do
       val=$(eval "printf %s \"\${$v-}\"")
       if [ -n "$val" ]; then
@@ -196,9 +246,13 @@ cls__show() {
                       *) printf "  %s=%s\n" "$v" "$val";; esac
       else printf "  %s=<unset>\n" "$v"; fi
     done'
-    return 0
+    return 0 ;;
+    esac
   fi
-  if [ -n "${BASH_VERSION:-}" ] && declare -p CLS_MANAGED_VARS 2>/dev/null | grep -q 'declare \-a'; then
+  if [ -n "${BASH_VERSION:-}" ]; then
+    local decl
+    decl=$(declare -p CLS_MANAGED_VARS 2>/dev/null || true)
+    case "$decl" in *"declare -a"*)
     eval 'for v in "${CLS_MANAGED_VARS[@]}"; do
       val=$(eval "printf %s \"\${$v-}\"")
       if [ -n "$val" ]; then
@@ -206,7 +260,8 @@ cls__show() {
                       *) printf "  %s=%s\n" "$v" "$val";; esac
       else printf "  %s=<unset>\n" "$v"; fi
     done'
-    return 0
+    return 0 ;;
+    esac
   fi
   # string fallback
   for v in $CLS_MANAGED_VARS; do
@@ -249,7 +304,7 @@ clsenv() {
 Usage: clsenv [--env-file <path>] <command> [args]
 
   list                 # show available env names (from config)
-  use <name>           # switch current shell to this env
+  use <name>           # switch current shell to this env (persists across shells)
   reload [<name>]      # (optionally switch) then restart the shell
   show                 # print managed vars (masked for secrets)
   current              # print active env name
@@ -262,16 +317,7 @@ EOF
   esac
 }
 
-# Preload the config once at top level so arrays/functions declared with
-# 'typeset' become global in shells that lack 'declare -g' (e.g., bash 3.2).
-if [ -z "${CLS_ENV_FILE_PICKED:-}" ]; then
-  env_file_preload="$(cls__resolve_env_file)"
-  if [ -r "$env_file_preload" ]; then
-    CLS_ENV_FILE_PICKED="$env_file_preload"
-    # shellcheck disable=SC1090
-    . "$env_file_preload"
-  fi
-fi
+# (Config is sourced on demand; avoid double-sourcing here.)
 
 # Optional CLI shortcut: 'cls' → claude
 cls__maybe_shortcut() {
@@ -286,8 +332,18 @@ cls__maybe_shortcut
 # Initialize default env once per shell
 if [ -z "${CLAUDE_ENV_ACTIVE:-}" ]; then
   cls__source_envfile
-  cls__use "$CLAUDE_ENV_DEFAULT" >/dev/null 2>&1 || {
-    cls__unset_managed
-    export CLAUDE_ENV_ACTIVE="default"
-  }
+  # Try to load saved state first, otherwise use default
+  saved_env="$(cls__load_state)"
+  if [ -n "$saved_env" ]; then
+    cls__use "$saved_env" >/dev/null 2>&1 || {
+      cls__unset_managed
+      export CLAUDE_ENV_ACTIVE="default"
+    }
+  else
+    cls__use "$CLAUDE_ENV_DEFAULT" >/dev/null 2>&1 || {
+      cls__unset_managed
+      export CLAUDE_ENV_ACTIVE="default"
+    }
+  fi
+  unset saved_env
 fi
