@@ -25,10 +25,10 @@ cls_apply_env() {
       return 0
       ;;
 
-    anthropic)
-      # Production Anthropic API
-      export ANTHROPIC_BASE_URL="https://api.anthropic.com"
-      export ANTHROPIC_AUTH_TOKEN="sk-ant-REPLACE_ME_PROD"
+    GLM-4.5)
+      export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+      export ANTHROPIC_AUTH_TOKEN="sk-glm-api-token"
+      export ANTHROPIC_MODEL="GLM-4.5"
       ;;
 
     deepseek)

@@ -26,6 +26,8 @@ cp claude-env-sets.sh ~/.claude/claude-env-sets.sh
 
 ```bash
 clsenv list # show environments (from claude-env-sets.sh)
+clsenv       # with fzf installed: interactive menu to pick a command
+clsenv use   # with fzf installed: interactive env picker (includes --local)
 clsenv -e ./project/claude-env-sets.sh list # use a custom config path just for this shell
 clsenv use anthropic # switch current shell
 clsenv --local use anthropic # switch only this shell (do not persist)
@@ -52,6 +54,13 @@ Flags:
   -e, --env-file <path>  Use a specific claude-env-sets.sh for this shell
   -l, --local            Do not persist the change; only affect current shell
 ```
+
+### fzf-powered interactive mode
+
+- Requirements: `fzf` installed and running in a TTY.
+- `clsenv` with no args opens an interactive menu of commands (simplified; local toggles live inside `use`).
+- `clsenv use` with no args opens an interactive picker of environments. For each non-default env you’ll see both the normal and `--local` options.
+- Selecting `list` from the interactive menu shows the environments in an fzf viewer (view-only).
 
 ### Local vs. persistent switches
 
