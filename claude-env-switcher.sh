@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Claude environment switcher
-# Usage after sourcing:  clsenv list|use <name>|reload [name]|show|current|clear
+# Usage after sourcing:
+#   clsenv [--env-file <path>] [--local] <command> [args]
+# Commands: list | use <name> | reload [name] | show | current | clear
+#
+# --local (-l) applies the change only to the current shell session and
+# does not persist it to the state file used by new shells.
 #
 # The config (claude-env-sets.sh) provides:
 #   - CLS_ENV_NAMES          : list/array of available env names
@@ -215,8 +220,10 @@ cls__use() {
   fi
 
   export CLAUDE_ENV_ACTIVE="$name"
-  # Save the state for future shell invocations
-  cls__save_state "$name"
+  # Save the state for future shell invocations unless --local was used
+  if [ "${CLS_LOCAL_ONLY:-0}" != "1" ]; then
+    cls__save_state "$name"
+  fi
 }
 
 cls__reload() {
@@ -277,6 +284,7 @@ cls__show() {
 
 clsenv() {
   # Optional global options parsed before the command
+  local CLS_LOCAL_ONLY=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --env-file=*) CLS_ENV_FILE_CLI="${1#*=}"; export CLAUDE_ENV_FILE="$CLS_ENV_FILE_CLI"; shift ;;
@@ -286,6 +294,8 @@ clsenv() {
         else
           cls__err "missing path after $1"; return 2
         fi ;;
+      --local|-l)
+        CLS_LOCAL_ONLY=1; shift ;;
       --) shift; break ;;
       -*) break ;;
       *) break ;;
@@ -301,7 +311,7 @@ clsenv() {
     clear|default) cls__use default ;;
     help|-h|--help)
       cat <<'EOF'
-Usage: clsenv [--env-file <path>] <command> [args]
+Usage: clsenv [--env-file <path>] [--local] <command> [args]
 
   list                 # show available env names (from config)
   use <name>           # switch current shell to this env (persists across shells)
@@ -311,6 +321,7 @@ Usage: clsenv [--env-file <path>] <command> [args]
   clear|default        # switch to the empty default env
 \nOptions:
   -e, --env-file <path>   use a specific claude-env-sets.sh (overrides env var)
+  -l, --local             do not persist change; affects only current shell
 EOF
       ;;
     *) cls__err "unknown command: $cmd (see clsenv help)"; return 1 ;;
