@@ -34,7 +34,7 @@ cls__default_env_file() {
   printf '%s/claude-env-sets.sh' "$(cls__script_dir)"
 }
 
-cls__expand_tilde() {DDDDD
+cls__expand_tilde() {
   case "$1" in "~"*) printf '%s\n' "${HOME}${1#\~}";; *) printf '%s\n' "$1";; esac
 }
 
