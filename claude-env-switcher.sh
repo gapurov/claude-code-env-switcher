@@ -110,6 +110,98 @@ cls__source_envfile() {
   fi
 }
 
+# fzf detection
+cls__has_fzf() {
+  command -v fzf >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]
+}
+
+# Interactive: list envs with fzf (view-only)
+cls__interactive_list() {
+  cls__source_envfile
+  command -v fzf >/dev/null 2>&1 || { cls__list; return 0; }
+  local lines=() n active
+  active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  lines+=( "$( [ "$active" = "default" ] && printf '* ' || printf '  ' )default" )
+  while IFS= read -r n; do
+    [ -z "$n" ] && continue
+    [ "$n" = "default" ] && continue
+    if [ "$n" = "$active" ]; then lines+=( "* $n" ); else lines+=( "  $n" ); fi
+  done <<EOF
+$(cls__each_envname)
+EOF
+  printf '%s\n' "${lines[@]}" | fzf \
+    --prompt='clsenv list> ' \
+    --header='Environments (active marked with *)' \
+    --no-sort --height=60% --border --ansi >/dev/null || true
+}
+
+# Interactive: choose env for `use` (with optional --local variants)
+cls__interactive_use() {
+  cls__source_envfile
+  if ! cls__has_fzf; then
+    cls__list
+    cls__err "fzf not available for interactive selection" || true
+    return 2
+  fi
+  local dim=$'\033[2m' normal=$'\033[0m'
+  local choices=() n active sel name make_local=0
+  active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  local model_disp="${ANTHROPIC_MODEL:--}"
+  choices+=( "default" )
+  while IFS= read -r n; do
+    [ -z "$n" ] && continue
+    [ "$n" = "default" ] && continue
+    choices+=( "$n" "$n --local ${dim}do not persist${normal}" )
+  done <<EOF
+$(cls__each_envname)
+EOF
+  sel=$(printf '%s\n' "${choices[@]}" | fzf \
+    --prompt='clsenv use> ' \
+    --header=$'Select environment (pick normal or --local to not persist)\nActive: '"$active"$'  |  Model: '"$model_disp" \
+    --height=60% --border --ansi) || return 130
+  case "$sel" in
+    *' --local'*) name="${sel%% --local*}"; make_local=1 ;;
+    *) name="$sel" ;;
+  esac
+  [ -z "$name" ] && return 0
+  if [ "$make_local" -eq 1 ]; then
+    CLS_LOCAL_ONLY=1 cls__use "$name" && printf 'switched to %s (local)\n' "$name"
+  else
+    CLS_LOCAL_ONLY=0 cls__use "$name" && printf 'switched to %s\n' "$name"
+  fi
+}
+
+# Interactive: top-level menu
+cls__interactive_root() {
+  if ! cls__has_fzf; then
+    cls__err "fzf not available; showing help" || true
+    clsenv help
+    return 0
+  fi
+  local dim=$'\033[2m' normal=$'\033[0m'
+  local opts=(
+    "use ${dim}pick env${normal}"
+    "list ${dim}view envs${normal}"
+    "reload ${dim}login shell${normal}"
+    'show'
+    "clear ${dim}switch to default${normal}"
+  ) sel
+  local _active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  local _model_disp="${ANTHROPIC_MODEL:--}"
+  sel=$(printf '%s\n' "${opts[@]}" | fzf \
+    --prompt='clsenv> ' \
+    --header=$'Select a command\nActive: '"${_active}"$'  |  Model: '"${_model_disp}" \
+    --height=50% --border --ansi) || return 130
+  case "$sel" in
+    list*) cls__list ;;
+    use*) cls__interactive_use ;;
+    reload*) cls__reload ;;
+    'show') cls__show ;;
+    clear*) CLS_LOCAL_ONLY=0 cls__use default ;;
+    *) return 0 ;;
+  esac
+}
+
 # Print a masked version of a secret value (first 4 … last 4)
 cls__mask() {
   local val=$1 len=${#1} first last
@@ -284,7 +376,7 @@ cls__show() {
 
 clsenv() {
   # Optional global options parsed before the command
-  local CLS_LOCAL_ONLY=0
+  CLS_LOCAL_ONLY=0
   while [ $# -gt 0 ]; do
     case "$1" in
       --env-file=*) CLS_ENV_FILE_CLI="${1#*=}"; export CLAUDE_ENV_FILE="$CLS_ENV_FILE_CLI"; shift ;;
@@ -301,10 +393,21 @@ clsenv() {
       *) break ;;
     esac
   done
+  # If no command and fzf is available, open interactive menu
+  if [ $# -eq 0 ] && cls__has_fzf; then
+    cls__interactive_root
+    return $?
+  fi
   local cmd="${1:-help}"; shift || true
   case "$cmd" in
     list)      cls__list ;;
-    use)       cls__use "$@" ;;
+    use)
+      if [ $# -eq 0 ] && cls__has_fzf; then
+        cls__interactive_use
+      else
+        cls__use "$@"
+      fi
+      ;;
     reload)    cls__reload "$@" ;;
     show)      cls__show ;;
     current)   printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;

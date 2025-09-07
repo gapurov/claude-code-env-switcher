@@ -59,8 +59,8 @@ Flags:
 
 - Requirements: `fzf` installed and running in a TTY.
 - `clsenv` with no args opens an interactive menu of commands (simplified; local toggles live inside `use`).
-- `clsenv use` with no args opens an interactive picker of environments. For each non-default env you’ll see both the normal and `--local` options.
-- Selecting `list` from the interactive menu shows the environments in an fzf viewer (view-only).
+- `clsenv use` with no args opens an interactive picker of environments. For each non-default env you’ll see both the normal and `--local` (dimmed “do not persist”) options. After selection, it prints the chosen environment.
+- Selecting `list` from the interactive menu prints the environments (no fzf selection).
 
 ### Local vs. persistent switches
 
