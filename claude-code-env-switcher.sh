@@ -155,7 +155,7 @@ $(cc__each_envname)
 EOF
   sel=$(printf '%s\n' "${choices[@]}" | fzf \
     --prompt='ccenv use> ' \
-    --header=$'Select environment (pick normal or --local to not persist)\nActive: '"$active"$'  |  Model: '"$model_disp" \
+    --header=$'Select environment (--local to not persist)\nActive: '"$active"$'  |  Model: '"$model_disp" \
     --height=60% --border --ansi) || return 130
   case "$sel" in
     *' --local'*) name="${sel%% --local*}"; make_local=1 ;;
@@ -178,8 +178,9 @@ cc__interactive_root() {
   fi
   local dim=$'\033[2m' normal=$'\033[0m'
   local opts=(
-    "use ${dim}pick env${normal}"
-    "list ${dim}view envs${normal}"
+    "use ${dim}select env${normal}"
+    "list ${dim}view available envs${normal}"
+    "current ${dim}print active env${normal}"
     "reload ${dim}login shell${normal}"
     'show'
     "clear ${dim}switch to default${normal}"
@@ -193,6 +194,7 @@ cc__interactive_root() {
   case "$sel" in
     list*) cc__list ;;
     use*) cc__interactive_use ;;
+    current*) printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
     reload*) cc__reload ;;
     'show') cc__show ;;
     clear*) CLS_LOCAL_ONLY=0 cc__use default ;;
@@ -396,7 +398,7 @@ ccenv() {
     cc__interactive_root
     return $?
   fi
-  local cmd="${1:-help}"; shift || true
+  local cmd="${1:-help}"; [ $# -gt 0 ] && shift
   case "$cmd" in
     list)      cc__list ;;
     use)
