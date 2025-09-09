@@ -130,7 +130,7 @@ EOF
   printf '%s\n' "${lines[@]}" | fzf \
     --prompt='ccenv list> ' \
     --header='Environments (active marked with *)' \
-    --no-sort --height=60% --border --ansi >/dev/null || true
+    --no-sort --height=50% --layout=reverse --margin=0 --border --ansi >/dev/null || true
 }
 
 # Interactive: choose env for `use` (with optional --local variants)
@@ -155,8 +155,8 @@ $(cc__each_envname)
 EOF
   sel=$(printf '%s\n' "${choices[@]}" | fzf \
     --prompt='ccenv use> ' \
-    --header=$'Select environment (--local to not persist)\nActive: '"$active"$'  |  Model: '"$model_disp" \
-    --height=60% --border --ansi) || return 130
+    --header="Select environment (--local to not persist) | Active: $active | Model: $model_disp" \
+    --height=50% --layout=reverse --margin=0 --border --ansi) || return 130
   case "$sel" in
     *' --local'*) name="${sel%% --local*}"; make_local=1 ;;
     *) name="$sel" ;;
@@ -189,8 +189,8 @@ cc__interactive_root() {
   local _model_disp="${ANTHROPIC_MODEL:--}"
   sel=$(printf '%s\n' "${opts[@]}" | fzf \
     --prompt='ccenv> ' \
-    --header=$'Select a command\nActive: '"${_active}"$'  |  Model: '"${_model_disp}" \
-    --height=50% --border --ansi) || return 130
+    --header="Select a command | Active: $_active | Model: $_model_disp" \
+    --height=40% --layout=reverse --margin=0 --border --ansi) || return 130
   case "$sel" in
     list*) cc__list ;;
     use*) cc__interactive_use ;;
