@@ -1,6 +1,6 @@
 # Claude Code Environment Switcher
 
-Simple environment switcher for Claude Code.
+Simple environment switcher for Claude Code with fzf support.
 
 ## Installation
 
