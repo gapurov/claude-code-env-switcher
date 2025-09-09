@@ -1,5 +1,7 @@
 # Claude Code Environment Switcher
 
+Simple environment switcher for Claude Code.
+
 ## Installation
 
 ```bash
