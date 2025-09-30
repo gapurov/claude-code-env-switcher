@@ -130,7 +130,7 @@ EOF
   printf '%s\n' "${lines[@]}" | fzf \
     --prompt='ccenv list> ' \
     --header='Environments (active marked with *)' \
-    --no-sort --height=10% --layout=default --margin=0 --border --ansi >/dev/null || true
+    --no-sort --height=6% --layout=default --margin=0 --border --ansi >/dev/null || true
 }
 
 # Interactive: choose env for `use` (with optional --local variants)
@@ -142,24 +142,40 @@ cc__interactive_use() {
     return 2
   fi
   local dim=$'\033[2m' normal=$'\033[0m'
-  local choices=() n active sel name make_local=0
-  active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  local model_disp="${ANTHROPIC_MODEL:--}"
-  choices+=( "default" )
+  local sep=$'\037'
+  local choices=() n sel name make_local=0
+  local active_env="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  local model_disp="${ANTHROPIC_MODEL:-}"
+  if [ -z "$model_disp" ] || [ "$model_disp" = "-" ]; then
+    if [ "$active_env" = "default" ]; then
+      model_disp='default'
+    else
+      model_disp='-'
+    fi
+  fi
+  local model_suffix=""
+  if [ "${CLAUDE_ENV_IS_LOCAL:-0}" = "1" ]; then
+    model_suffix=' (local)'
+  fi
+  choices+=( "default${sep}default" )
   while IFS= read -r n; do
     [ -z "$n" ] && continue
     [ "$n" = "default" ] && continue
-    choices+=( "$n" "$n --local ${dim}do not persist${normal}" )
+    choices+=( "${n}${sep}${n}" )
+    choices+=( "${n}|local${sep}${n} --local ${dim}do not persist${normal}" )
   done <<EOF
 $(cc__each_envname)
 EOF
   sel=$(printf '%s\n' "${choices[@]}" | fzf \
     --prompt='ccenv use> ' \
-    --header="Select environment (--local to not persist) | Active: $active | Model: $model_disp" \
-    --height=10% --layout=default --margin=0 --border --ansi) || return 130
-  case "$sel" in
-    *' --local'*) name="${sel%% --local*}"; make_local=1 ;;
-    *) name="$sel" ;;
+    --header="Select environment (--local to not persist) | Active: ${model_disp}${model_suffix}" \
+    --height=6% --layout=default --margin=0 --border --ansi \
+    --with-nth=2 --delimiter="$sep") || return 130
+  local value="${sel%%$sep*}"
+  [ -z "$value" ] && return 0
+  case "$value" in
+    *'|local') name="${value%|local}"; make_local=1 ;;
+    *) name="$value" ;;
   esac
   [ -z "$name" ] && return 0
   if [ "$make_local" -eq 1 ]; then
@@ -177,27 +193,36 @@ cc__interactive_root() {
     return 0
   fi
   local dim=$'\033[2m' normal=$'\033[0m'
+  local sep=$'\037'
   local opts=(
-    "use ${dim}select env${normal}"
-    "list ${dim}view available envs${normal}"
-    "current ${dim}print active env${normal}"
-    "reload ${dim}login shell${normal}"
-    'show'
-    "clear ${dim}switch to default${normal}"
+    "clear${sep}clear ${dim}env${normal}"
+    "reload${sep}reload ${dim}env${normal}"
+    "select${sep}select ${dim}env${normal}"
   ) sel
-  local _active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  local _model_disp="${ANTHROPIC_MODEL:--}"
+  local _active_env="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  local _model_disp="${ANTHROPIC_MODEL:-}"
+  if [ -z "$_model_disp" ] || [ "$_model_disp" = "-" ]; then
+    if [ "$_active_env" = "default" ]; then
+      _model_disp='default'
+    else
+      _model_disp='-'
+    fi
+  fi
+  local _model_suffix=""
+  if [ "${CLAUDE_ENV_IS_LOCAL:-0}" = "1" ]; then
+    _model_suffix=' (local)'
+  fi
   sel=$(printf '%s\n' "${opts[@]}" | fzf \
     --prompt='ccenv> ' \
-    --header="Select a command | Active: $_active | Model: $_model_disp" \
-    --height=10% --layout=default --margin=0 --border --ansi) || return 130
-  case "$sel" in
-    list*) cc__list ;;
-    use*) cc__interactive_use ;;
-    current*) printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
-    reload*) cc__reload ;;
-    'show') cc__show ;;
-    clear*) CCENV_LOCAL_ONLY=0 cc__use default ;;
+    --header="Active: ${_model_disp}${_model_suffix}" \
+    --height=6% --layout=default --margin=0 --border --ansi \
+    --with-nth=2 --delimiter="$sep") || return 130
+  local choice="${sel%%$sep*}"
+  [ -z "$choice" ] && return 0
+  case "$choice" in
+    clear) CCENV_LOCAL_ONLY=0 cc__use default ;;
+    reload) cc__reload ;;
+    select) cc__interactive_use ;;
     *) return 0 ;;
   esac
 }
@@ -308,6 +333,11 @@ cc__use() {
   fi
 
   export CLAUDE_ENV_ACTIVE="$name"
+  if [ "${CCENV_LOCAL_ONLY:-0}" = "1" ]; then
+    export CLAUDE_ENV_IS_LOCAL=1
+  else
+    export CLAUDE_ENV_IS_LOCAL=0
+  fi
   # Save the state for future shell invocations unless --local was used
   if [ "${CCENV_LOCAL_ONLY:-0}" != "1" ]; then
     cc__save_state "$name"
