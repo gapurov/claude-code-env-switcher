@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Claude environment switcher
+# Version: 0.3.0
 # Usage after sourcing:
 #   ccenv [--env-file <path>] [--local] <command> [args]
 # Commands: list | use <name> | reload [name] | show | current | clear
@@ -14,12 +15,22 @@
 #   - ccenv_apply_env <name> : required function; returns non‑zero if unknown
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
+# Script version (exposed via `ccenv version`)
+CCENV_VERSION="0.3.0"
+
 # Default environment name when none is active
 : "${CLAUDE_ENV_DEFAULT:=default}"
 
 
 # Default config path: single file next to this script; overridable.
-cc__script_dir() {
+CCENV__SCRIPT_DIR=""
+
+ccenv__script_dir() {
+  if [ -n "${CCENV__SCRIPT_DIR:-}" ]; then
+    printf '%s\n' "$CCENV__SCRIPT_DIR"
+    return 0
+  fi
+
   local src=""
   if [ -n "${BASH_VERSION:-}" ] && [ -n "${BASH_SOURCE[0]+x}" ]; then
     src="${BASH_SOURCE[0]}"
@@ -30,120 +41,141 @@ cc__script_dir() {
     src="$0"
   fi
   case "$src" in "~"*) src="${HOME}${src#\~}";; esac
-  printf '%s\n' "$(cd -P -- "$(dirname -- "$src")" 2>/dev/null && pwd)"
+  CCENV__SCRIPT_DIR="$(cd -P -- "$(dirname -- "$src")" 2>/dev/null && pwd)"
+  printf '%s\n' "$CCENV__SCRIPT_DIR"
 }
 
-cc__default_env_file() {
-  printf '%s/claude-code-env-sets.sh' "$(cc__script_dir)"
+ccenv__default_env_file() {
+  printf '%s/claude-code-env-sets.sh' "$(ccenv__script_dir)"
 }
 
-cc__state_file() {
-  printf '%s/.claude-code-env-state' "$(cc__script_dir)"
+ccenv__state_file() {
+  printf '%s/.claude-code-env-state' "$(ccenv__script_dir)"
 }
 
-cc__expand_tilde() {
+ccenv__expand_tilde() {
   case "$1" in "~"*) printf '%s\n' "${HOME}${1#\~}";; *) printf '%s\n' "$1";; esac
 }
 
 # Resolve env file with precedence: CLI > env var > default
-cc__resolve_env_file() {
+ccenv__resolve_env_file() {
   local candidate
   if [ -n "${CCENV_ENV_FILE_CLI:-}" ]; then
     candidate="$CCENV_ENV_FILE_CLI"
   elif [ -n "${CLAUDE_ENV_FILE:-}" ]; then
     candidate="$CLAUDE_ENV_FILE"
   else
-    candidate="$(cc__default_env_file)"
+    candidate="$(ccenv__default_env_file)"
   fi
-  candidate="$(cc__expand_tilde "$candidate")"
+  candidate="$(ccenv__expand_tilde "$candidate")"
   printf '%s\n' "$candidate"
+}
+
+CCENV__CONFIG_PATH=""
+CCENV__CONFIG_MTIME=""
+CCENV__CONFIG_STATUS=""
+CCENV__CONFIG_LAST_ERROR=""
+
+ccenv__file_mtime() {
+  local path="$1" ts
+  if [ -z "$path" ] || [ ! -e "$path" ]; then
+    printf '0'
+    return 0
+  fi
+  if ts=$(stat -f '%m' "$path" 2>/dev/null); then
+    printf '%s' "$ts"
+    return 0
+  fi
+  if ts=$(stat -c '%Y' "$path" 2>/dev/null); then
+    printf '%s' "$ts"
+    return 0
+  fi
+  printf '0'
+}
+
+ccenv__report_config_issue() {
+  local msg="$1"
+  if [ "$msg" != "${CCENV__CONFIG_LAST_ERROR:-}" ]; then
+    CCENV__CONFIG_LAST_ERROR="$msg"
+    ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "$msg"
+  fi
 }
 
 # -----------------------------------------------------------------------------
 
 
 # --- helpers -----------------------------------------------------------------
-cc__err() { printf 'ccenv: %s\n' "$*" >&2; return 1; }
+# Standardized error handling
+readonly CCENV_ERR_UNKNOWN_CMD=1
+readonly CCENV_ERR_MISSING_ARG=2
+readonly CCENV_ERR_FILE_NOT_FOUND=3
+readonly CCENV_ERR_INVALID_ENV=4
 
+ccenv__error() {
+  # usage: ccenv__error <code> <message>
+  local code="$1"; shift
+  printf 'ccenv: %s\n' "$*" >&2
+  return "$code"
+}
 
-cc__source_envfile() {
-  local env_file
-  env_file="$(cc__resolve_env_file)"
-  if [ -r "$env_file" ]; then
-    CCENV_ENV_FILE_PICKED="$env_file"
-    # Ensure config-declared variables/functions land in the global scope.
-    # In both zsh and bash, 'typeset/declare' inside a function creates locals,
-    # which would be discarded on return. Temporarily wrap to force globals.
-    if [ -n "${ZSH_VERSION:-}" ]; then
-      # Preserve and temporarily enable alias expansion so our 'typeset' alias
-      # works, then restore the previous state to avoid altering the user's
-      # shell options.
-      local had_aliases=0
-      if [[ -o aliases ]]; then had_aliases=1; fi
-      setopt aliases 2>/dev/null || true
-      alias typeset='typeset -g' 2>/dev/null || true
-      # shellcheck disable=SC1090
-      . "$env_file"
-      unalias typeset 2>/dev/null || true
-      if [ "$had_aliases" -eq 0 ]; then unsetopt aliases 2>/dev/null || true; fi
-    elif [ -n "${BASH_VERSION:-}" ]; then
-      if declare -g __probe 2>/dev/null; then
-        unset __probe
-        typeset() { builtin declare -g "$@"; }
-        # shellcheck disable=SC1090
-        . "$env_file"
-        unset -f typeset 2>/dev/null || true
-      else
-        # Older bash without -g: neutralize 'typeset' so assignments are global
-        typeset() { :; }
-        # shellcheck disable=SC1090
-        . "$env_file"
-        unset -f typeset 2>/dev/null || true
-      fi
-    else
-      # Fallback: plain source
-      # shellcheck disable=SC1090
-      . "$env_file"
+# Backward-compat shim
+ccenv__err() { ccenv__error "$CCENV_ERR_UNKNOWN_CMD" "$@"; }
+
+# Array and variable helpers with minimal eval surface
+ccenv__is_array() {
+  # usage: ccenv__is_array VAR_NAME
+  local _n="$1" decl
+  if [ -n "${BASH_VERSION:-}" ]; then
+    decl=$(declare -p "$_n" 2>/dev/null || true)
+    case "$decl" in *'declare -a'*|*'declare -A'*) return 0;; esac
+    return 1
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    decl=$(typeset -p "$_n" 2>/dev/null || true)
+    case "$decl" in *'typeset -a'*|*'typeset -A'*) return 0;; esac
+    return 1
+  fi
+  return 1
+}
+
+ccenv__iterate_array() {
+  # usage: ccenv__iterate_array VAR_NAME
+  local _n="$1"
+
+  if [ -n "${BASH_VERSION:-}" ] && ccenv__is_array "$_n"; then
+    local bash_major="${BASH_VERSINFO[0]:-0}"
+    local bash_minor="${BASH_VERSINFO[1]:-0}"
+    if [ "$bash_major" -gt 4 ] || { [ "$bash_major" -eq 4 ] && [ "$bash_minor" -ge 3 ]; }; then
+      local -n ccenv__arr_ref="$_n"
+      for __cc_i in "${ccenv__arr_ref[@]}"; do printf '%s\n' "$__cc_i"; done
+      return 0
     fi
   fi
-}
 
-# fzf detection
-cc__has_fzf() {
-  command -v fzf >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]
-}
-
-# Interactive: list envs with fzf (view-only)
-cc__interactive_list() {
-  cc__source_envfile
-  command -v fzf >/dev/null 2>&1 || { cc__list; return 0; }
-  local lines=() n active
-  active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  lines+=( "$( [ "$active" = "default" ] && printf '* ' || printf '  ' )default" )
-  while IFS= read -r n; do
-    [ -z "$n" ] && continue
-    [ "$n" = "default" ] && continue
-    if [ "$n" = "$active" ]; then lines+=( "* $n" ); else lines+=( "  $n" ); fi
-  done <<EOF
-$(cc__each_envname)
-EOF
-  printf '%s\n' "${lines[@]}" | fzf \
-    --prompt='ccenv list> ' \
-    --header='Environments (active marked with *)' \
-    --no-sort --height=6% --layout=default --margin=0 --border --ansi >/dev/null || true
-}
-
-# Interactive: choose env for `use` (with optional --local variants)
-cc__interactive_use() {
-  cc__source_envfile
-  if ! cc__has_fzf; then
-    cc__list
-    cc__err "fzf not available for interactive selection" || true
-    return 2
+  if [ -n "${ZSH_VERSION:-}" ] && ccenv__is_array "$_n"; then
+    local -a ccenv__vals
+    ccenv__vals=( "${(@P)_n[@]}" )
+    local __cc_i
+    for __cc_i in "${ccenv__vals[@]}"; do printf '%s\n' "$__cc_i"; done
+    return 0
   fi
-  local dim=$'\033[2m' normal=$'\033[0m'
-  local sep=$'\037'
-  local choices=() n sel name make_local=0
+
+  eval "for __cc_i in \${$_n}; do printf '%s\\n' \"\$__cc_i\"; done"
+}
+
+ccenv__var_get() {
+  # usage: ccenv__var_get VAR_NAME   -> prints value (empty if unset)
+  local _n="$1"
+  if [ -n "${BASH_VERSION:-}" ]; then
+    printf '%s' "${!_n-}"
+  elif [ -n "${ZSH_VERSION:-}" ]; then
+    printf '%s' "${(P)_n-}"
+  else
+    eval "printf '%s' \"\${$_n-}\""
+  fi
+}
+
+# UI helpers
+ccenv__active_label() {
   local active_env="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
   local model_disp="${ANTHROPIC_MODEL:-}"
   if [ -z "$model_disp" ] || [ "$model_disp" = "-" ]; then
@@ -153,10 +185,164 @@ cc__interactive_use() {
       model_disp='-'
     fi
   fi
-  local model_suffix=""
   if [ "${CLAUDE_ENV_IS_LOCAL:-0}" = "1" ]; then
-    model_suffix=' (local)'
+    printf '%s (local)' "$model_disp"
+  else
+    printf '%s' "$model_disp"
   fi
+}
+
+ccenv__fzf() {
+  # usage: ccenv__fzf <prompt> <header> [extra fzf args]
+  local _p="$1" _h="$2"
+  shift 2 || true
+  fzf \
+    --prompt="$_p" \
+    --header="$_h" \
+    --height=6% --layout=default --margin=0 --border --ansi \
+    "$@"
+}
+
+# Source-once cache (with mtime tracking)
+CCENV__CONFIG_LOADED=0
+ccenv__source_envfile_once() {
+  local env_file env_file_mtime=""
+  env_file="$(ccenv__resolve_env_file)" || return 1
+
+  if [ "$env_file" != "${CCENV__CONFIG_PATH:-}" ]; then
+    CCENV__CONFIG_LOADED=0
+    CCENV__CONFIG_MTIME=""
+    CCENV__CONFIG_LAST_ERROR=""
+  elif [ "$CCENV__CONFIG_LOADED" -eq 1 ] && [ "${CCENV__CONFIG_STATUS:-}" = "ok" ]; then
+    env_file_mtime="$(ccenv__file_mtime "$env_file")"
+    if [ "$env_file_mtime" != "${CCENV__CONFIG_MTIME:-}" ]; then
+      CCENV__CONFIG_LOADED=0
+    fi
+  fi
+
+  if [ "$CCENV__CONFIG_LOADED" -eq 0 ]; then
+    if ccenv__source_envfile "$env_file"; then
+      CCENV__CONFIG_STATUS="ok"
+      if [ -z "$env_file_mtime" ]; then
+        env_file_mtime="$(ccenv__file_mtime "$env_file")"
+      fi
+      CCENV__CONFIG_MTIME="$env_file_mtime"
+      CCENV__CONFIG_LOADED=1
+    else
+      CCENV__CONFIG_STATUS="error"
+      CCENV__CONFIG_MTIME=""
+      CCENV__CONFIG_LOADED=0
+      CCENV__CONFIG_PATH="$env_file"
+      return 1
+    fi
+    CCENV__CONFIG_PATH="$env_file"
+  fi
+
+  return 0
+}
+
+ccenv__reload_config() {
+  CCENV__CONFIG_LOADED=0
+  CCENV__CONFIG_MTIME=""
+  CCENV__CONFIG_STATUS=""
+  CCENV__CONFIG_LAST_ERROR=""
+  ccenv__source_envfile_once
+}
+
+
+ccenv__source_envfile() {
+  local env_file="$1"
+  if [ -z "$env_file" ]; then
+    env_file="$(ccenv__resolve_env_file)" || return 1
+  fi
+
+  if [ ! -e "$env_file" ]; then
+    ccenv__report_config_issue "config file not found: $env_file"
+    return $CCENV_ERR_FILE_NOT_FOUND
+  fi
+  if [ ! -r "$env_file" ]; then
+    ccenv__report_config_issue "config file not readable: $env_file"
+    return $CCENV_ERR_FILE_NOT_FOUND
+  fi
+
+  CCENV_ENV_FILE_PICKED="$env_file"
+  CCENV__CONFIG_LAST_ERROR=""
+
+  # Ensure config-declared variables/functions land in the global scope.
+  # In both zsh and bash, 'typeset/declare' inside a function creates locals,
+  # which would be discarded on return. Temporarily wrap to force globals.
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    # Preserve and temporarily enable alias expansion so our 'typeset' alias
+    # works, then restore the previous state to avoid altering the user's
+    # shell options.
+    local had_aliases=0
+    if [[ -o aliases ]]; then had_aliases=1; fi
+    setopt aliases 2>/dev/null || true
+    alias typeset='typeset -g' 2>/dev/null || true
+    # shellcheck disable=SC1090
+    . "$env_file"
+    unalias typeset 2>/dev/null || true
+    if [ "$had_aliases" -eq 0 ]; then unsetopt aliases 2>/dev/null || true; fi
+  elif [ -n "${BASH_VERSION:-}" ]; then
+    if declare -g __probe 2>/dev/null; then
+      unset __probe
+      typeset() { builtin declare -g "$@"; }
+      # shellcheck disable=SC1090
+      . "$env_file"
+      unset -f typeset 2>/dev/null || true
+    else
+      # Older bash without -g: neutralize 'typeset' so assignments are global
+      typeset() { :; }
+      # shellcheck disable=SC1090
+      . "$env_file"
+      unset -f typeset 2>/dev/null || true
+    fi
+  else
+    # Fallback: plain source
+    # shellcheck disable=SC1090
+    . "$env_file"
+  fi
+
+  return 0
+}
+
+# fzf detection
+ccenv__has_fzf() {
+  command -v fzf >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]
+}
+
+# Interactive: list envs with fzf (view-only)
+ccenv__interactive_list() {
+  ccenv__source_envfile_once || true
+  command -v fzf >/dev/null 2>&1 || { ccenv__list; return 0; }
+  local lines=() n active
+  active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  lines+=( "$( [ "$active" = "default" ] && printf '* ' || printf '  ' )default" )
+  while IFS= read -r n; do
+    [ -z "$n" ] && continue
+    [ "$n" = "default" ] && continue
+    if [ "$n" = "$active" ]; then lines+=( "* $n" ); else lines+=( "  $n" ); fi
+  done <<EOF
+$(ccenv__each_envname)
+EOF
+  printf '%s\n' "${lines[@]}" | ccenv__fzf 'ccenv list> ' 'Environments (active marked with *)' \
+    --no-sort >/dev/null || true
+}
+
+# Interactive: choose env for `use` (with optional --local variants)
+ccenv__interactive_use() {
+  if ! ccenv__source_envfile_once; then
+    return $CCENV_ERR_FILE_NOT_FOUND
+  fi
+  if ! ccenv__has_fzf; then
+    ccenv__list
+    ccenv__err "fzf not available for interactive selection" || true
+    return $CCENV_ERR_MISSING_ARG
+  fi
+  local dim=$'\033[2m' normal=$'\033[0m'
+  local sep=$'\037'
+  local choices=() n sel name make_local=0
+  local header="Select environment (--local to not persist) | Active: $(ccenv__active_label)"
   choices+=( "default${sep}default" )
   while IFS= read -r n; do
     [ -z "$n" ] && continue
@@ -164,12 +350,9 @@ cc__interactive_use() {
     choices+=( "${n}${sep}${n}" )
     choices+=( "${n}|local${sep}${n} --local ${dim}do not persist${normal}" )
   done <<EOF
-$(cc__each_envname)
+$(ccenv__each_envname)
 EOF
-  sel=$(printf '%s\n' "${choices[@]}" | fzf \
-    --prompt='ccenv use> ' \
-    --header="Select environment (--local to not persist) | Active: ${model_disp}${model_suffix}" \
-    --height=6% --layout=default --margin=0 --border --ansi \
+  sel=$(printf '%s\n' "${choices[@]}" | ccenv__fzf 'ccenv use> ' "$header" \
     --with-nth=2 --delimiter="$sep") || return 130
   local value="${sel%%$sep*}"
   [ -z "$value" ] && return 0
@@ -179,56 +362,44 @@ EOF
   esac
   [ -z "$name" ] && return 0
   if [ "$make_local" -eq 1 ]; then
-    CCENV_LOCAL_ONLY=1 cc__use "$name" && printf 'switched to %s (local)\n' "$name"
+    CCENV_LOCAL_ONLY=1 ccenv__use "$name" && printf 'switched to %s (local)\n' "$name"
   else
-    CCENV_LOCAL_ONLY=0 cc__use "$name" && printf 'switched to %s\n' "$name"
+    CCENV_LOCAL_ONLY=0 ccenv__use "$name" && printf 'switched to %s\n' "$name"
   fi
 }
 
 # Interactive: top-level menu
-cc__interactive_root() {
-  if ! cc__has_fzf; then
-    cc__err "fzf not available; showing help" || true
+ccenv__interactive_root() {
+  if ! ccenv__has_fzf; then
+    ccenv__err "fzf not available; showing help" || true
     ccenv help
     return 0
   fi
   local dim=$'\033[2m' normal=$'\033[0m'
   local sep=$'\037'
-  local opts=(
-    "clear${sep}clear ${dim}env${normal}"
-    "reload${sep}reload ${dim}env${normal}"
-    "select${sep}select ${dim}env${normal}"
-  ) sel
-  local _active_env="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  local _model_disp="${ANTHROPIC_MODEL:-}"
-  if [ -z "$_model_disp" ] || [ "$_model_disp" = "-" ]; then
-    if [ "$_active_env" = "default" ]; then
-      _model_disp='default'
-    else
-      _model_disp='-'
-    fi
+  local opts=() sel
+  local __active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  if [ "${__active}" != "default" ]; then
+    opts+=( "clear${sep}reset to default" )
   fi
-  local _model_suffix=""
-  if [ "${CLAUDE_ENV_IS_LOCAL:-0}" = "1" ]; then
-    _model_suffix=' (local)'
-  fi
-  sel=$(printf '%s\n' "${opts[@]}" | fzf \
-    --prompt='ccenv> ' \
-    --header="Active: ${_model_disp}${_model_suffix}" \
-    --height=6% --layout=default --margin=0 --border --ansi \
+  opts+=(
+    "reload${sep}reload ${dim}shell${normal}"
+    "select${sep}select ${dim}claude code env${normal}"
+  )
+  sel=$(printf '%s\n' "${opts[@]}" | ccenv__fzf 'ccenv> ' "Active: $(ccenv__active_label)" \
     --with-nth=2 --delimiter="$sep") || return 130
   local choice="${sel%%$sep*}"
   [ -z "$choice" ] && return 0
   case "$choice" in
-    clear) CCENV_LOCAL_ONLY=0 cc__use default ;;
-    reload) cc__reload ;;
-    select) cc__interactive_use ;;
+    clear) CCENV_LOCAL_ONLY=0 ccenv__use default ;;
+    reload) ccenv__reload ;;
+    select) ccenv__interactive_use ;;
     *) return 0 ;;
   esac
 }
 
 # Print a masked version of a secret value (first 4 … last 4)
-cc__mask() {
+ccenv__mask() {
   local val=$1 len=${#1} first last
   if [ "$len" -le 8 ]; then printf '%s' "$val"; return; fi
   first=${val:0:4}
@@ -236,60 +407,73 @@ cc__mask() {
   printf '%s…%s' "$first" "$last"
 }
 
-cc__each_envname() {
-  local n printed=0
-  if [ -n "${ZSH_VERSION:-}" ]; then
-    local decl
-    decl=$(typeset -p CCENV_ENV_NAMES 2>/dev/null || true)
-    case "$decl" in
-      *"typeset -a"*) eval 'for n in "${CCENV_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
-    esac
-  elif [ -n "${BASH_VERSION:-}" ]; then
-    local decl
-    decl=$(declare -p CCENV_ENV_NAMES 2>/dev/null || true)
-    case "$decl" in
-      *"declare -a"*) eval 'for n in "${CCENV_ENV_NAMES[@]}"; do printf "%s\n" "$n"; done'; printed=1 ;;
-    esac
+ccenv__each_envname() { ccenv__iterate_array CCENV_ENV_NAMES; }
+
+ccenv__env_known() {
+  local candidate="$1" n
+  [ "$candidate" = "default" ] && return 0
+  if [ -z "${CCENV_ENV_NAMES:-}" ]; then
+    return 1
   fi
-  if [ "$printed" -eq 0 ] && [ -n "${CCENV_ENV_NAMES:-}" ]; then
-    for n in $CCENV_ENV_NAMES; do printf '%s\n' "$n"; done
+  while IFS= read -r n; do
+    [ -z "$n" ] && continue
+    if [ "$n" = "$candidate" ]; then
+      return 0
+    fi
+  done <<EOF
+$(ccenv__each_envname)
+EOF
+  return 1
+}
+
+ccenv__validate_env_name() {
+  local name="$1"
+  if [ -z "$name" ]; then
+    ccenv__error "$CCENV_ERR_MISSING_ARG" "usage: ccenv use <name>"
+    return $CCENV_ERR_MISSING_ARG
   fi
+  if [ "$name" = "default" ]; then
+    return 0
+  fi
+  if [ "${CCENV__CONFIG_STATUS:-}" != "ok" ]; then
+    ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "environment config not loaded; see --env-file"
+    return $CCENV_ERR_FILE_NOT_FOUND
+  fi
+  if ! ccenv__env_known "$name"; then
+    ccenv__error "$CCENV_ERR_INVALID_ENV" "unknown env '$name' (see: ccenv list)"
+    return $CCENV_ERR_INVALID_ENV
+  fi
+  return 0
 }
 
 # Clear vars declared as managed in the config.
-cc__unset_managed() {
+ccenv__unset_managed() {
   if [ -z "${CCENV_MANAGED_VARS:-}" ]; then return 0; fi
-  local v printed=0
-  if [ -n "${ZSH_VERSION:-}" ]; then
-    local decl
-    decl=$(typeset -p CCENV_MANAGED_VARS 2>/dev/null || true)
-    case "$decl" in
-      *"typeset -a"*) eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
-    esac
-  elif [ -n "${BASH_VERSION:-}" ] ; then
-    local decl
-    decl=$(declare -p CCENV_MANAGED_VARS 2>/dev/null || true)
-    case "$decl" in
-      *"declare -a"*) eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do unset "$v"; done'; printed=1 ;;
-    esac
-  fi
-  if [ "$printed" -eq 0 ]; then
-    for v in $CCENV_MANAGED_VARS; do unset "$v"; done
-  fi
+  local v
+  while IFS= read -r v; do
+    [ -z "$v" ] && continue
+    unset "$v"
+  done <<EOF
+$(ccenv__iterate_array CCENV_MANAGED_VARS)
+EOF
 }
 
 # Save the current environment to the state file
-cc__save_state() {
+ccenv__save_state() {
   local env_name="$1"
   local state_file
-  state_file="$(cc__state_file)"
-  printf '%s\n' "$env_name" > "$state_file"
+  state_file="$(ccenv__state_file)"
+  (
+    umask 077
+    printf '%s\n' "$env_name" > "$state_file"
+  )
+  chmod 600 "$state_file" 2>/dev/null || true
 }
 
 # Load the saved environment from the state file
-cc__load_state() {
+ccenv__load_state() {
   local state_file
-  state_file="$(cc__state_file)"
+  state_file="$(ccenv__state_file)"
   if [ -r "$state_file" ]; then
     local _s
     IFS= read -r _s < "$state_file" || true
@@ -298,8 +482,11 @@ cc__load_state() {
 }
 
 # --- public commands ----------------------------------------------------------
-cc__list() {
-  cc__source_envfile
+ccenv__list() {
+  local status=0
+  if ! ccenv__source_envfile_once; then
+    status=$CCENV_ERR_FILE_NOT_FOUND
+  fi
   local active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" n
   [ "$active" = "default" ] && printf '* default\n' || printf '  default\n'
   if [ -n "${CCENV_ENV_NAMES:-}" ]; then
@@ -309,27 +496,42 @@ cc__list() {
       [ "$n" = "default" ] && continue
       [ "$n" = "$active" ] && printf '* %s\n' "$n" || printf '  %s\n' "$n"
     done <<EOF
-$(cc__each_envname)
+$(ccenv__each_envname)
 EOF
   fi
+  return $status
 }
 
-cc__use() {
+ccenv__use() {
   local name="$1"
-  [ -z "$name" ] && { cc__err "usage: ccenv use <name>"; return 2; }
+  [ -z "$name" ] && { ccenv__error "$CCENV_ERR_MISSING_ARG" "usage: ccenv use <name>"; return $CCENV_ERR_MISSING_ARG; }
 
-  cc__source_envfile
-  cc__unset_managed
+  if [ "$name" = "default" ]; then
+    ccenv__source_envfile_once || true
+  else
+    if ! ccenv__source_envfile_once; then
+      return $CCENV_ERR_FILE_NOT_FOUND
+    fi
+  fi
+
+  if ! ccenv__validate_env_name "$name"; then
+    return $?
+  fi
+
+  ccenv__unset_managed
 
   # optional globals hook
   if command -v ccenv_globals >/dev/null 2>&1; then ccenv_globals || true; fi
 
   if [ "$name" != "default" ]; then
     if ! command -v ccenv_apply_env >/dev/null 2>&1; then
-      cc__err "missing ccenv_apply_env in config: $(cc__resolve_env_file 2>/dev/null || printf '?')"
-      return 1
+      ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "missing ccenv_apply_env in config: $(ccenv__resolve_env_file 2>/dev/null || printf '?')"
+      return $CCENV_ERR_FILE_NOT_FOUND
     fi
-    ccenv_apply_env "$name" || { cc__err "unknown env '$name' (see: ccenv list)"; return 1; }
+    if ! ccenv_apply_env "$name"; then
+      ccenv__error "$CCENV_ERR_INVALID_ENV" "unknown env '$name' (see: ccenv list)"
+      return $CCENV_ERR_INVALID_ENV
+    fi
   fi
 
   export CLAUDE_ENV_ACTIVE="$name"
@@ -340,66 +542,87 @@ cc__use() {
   fi
   # Save the state for future shell invocations unless --local was used
   if [ "${CCENV_LOCAL_ONLY:-0}" != "1" ]; then
-    cc__save_state "$name"
+    ccenv__save_state "$name"
   fi
 }
 
-cc__reload() {
-  [ -n "${1:-}" ] && cc__use "$1" || true
+ccenv__reload() {
+  [ -n "${1:-}" ] && ccenv__use "$1" || true
   # Exec the user's shell as a login shell so rc files are re-read.
   local shprog="${SHELL:-}"
   [ -z "$shprog" ] && shprog="$(command -v zsh 2>/dev/null || command -v bash 2>/dev/null || printf '/bin/sh')"
   exec "$shprog" -l
 }
 
-cc__show() {
+ccenv__show() {
+  local status=0
+  if ! ccenv__source_envfile_once; then
+    status=$CCENV_ERR_FILE_NOT_FOUND
+  fi
   printf 'active: %s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
   if [ -z "${CCENV_MANAGED_VARS:-}" ]; then
     printf '  (no CCENV_MANAGED_VARS configured)\n'
-    return 0
+    return $status
   fi
   local v val
-  # Iterate vars either as array or string
-  if [ -n "${ZSH_VERSION:-}" ]; then
-    local decl
-    decl=$(typeset -p CCENV_MANAGED_VARS 2>/dev/null || true)
-    case "$decl" in *"typeset -a"*)
-    eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do
-      val=$(eval "printf %s \"\${$v-}\"")
-      if [ -n "$val" ]; then
-        case "$v" in *KEY*|*TOKEN*|*SECRET*) printf "  %s=" "$v"; cc__mask "$val"; printf "\n";;
-                      *) printf "  %s=%s\n" "$v" "$val";; esac
-      else printf "  %s=<unset>\n" "$v"; fi
-    done'
-    return 0 ;;
-    esac
-    # no array; fall through to string fallback
-  fi
-  if [ -n "${BASH_VERSION:-}" ]; then
-    local decl
-    decl=$(declare -p CCENV_MANAGED_VARS 2>/dev/null || true)
-    case "$decl" in *"declare -a"*)
-    eval 'for v in "${CCENV_MANAGED_VARS[@]}"; do
-      val=$(eval "printf %s \"\${$v-}\"")
-      if [ -n "$val" ]; then
-        case "$v" in *KEY*|*TOKEN*|*SECRET*) printf "  %s=" "$v"; cc__mask "$val"; printf "\n";;
-                      *) printf "  %s=%s\n" "$v" "$val";; esac
-      else printf "  %s=<unset>\n" "$v"; fi
-    done'
-    return 0 ;;
-    esac
-    # no array; fall through to string fallback
-  fi
-  # string fallback
-  for v in ${CCENV_MANAGED_VARS}; do
-    val=$(eval "printf %s \"\${$v-}\"")
+  while IFS= read -r v; do
+    [ -z "$v" ] && continue
+    val="$(ccenv__var_get "$v")"
     if [ -n "$val" ]; then
-      case "$v" in *KEY*|*TOKEN*|*SECRET*) printf '  %s=' "$v"; cc__mask "$val"; printf '\n';;
-                    *) printf '  %s=%s\n' "$v" "$val";; esac
+      case "$v" in *KEY*|*TOKEN*|*SECRET*) printf '  %s=' "$v"; ccenv__mask "$val"; printf '\n' ;;
+                    *) printf '  %s=%s\n' "$v" "$val" ;;
+      esac
     else
       printf '  %s=<unset>\n' "$v"
     fi
-  done
+  done <<EOF
+$(ccenv__iterate_array CCENV_MANAGED_VARS)
+EOF
+  return $status
+}
+
+ccenv__command_use() {
+  if [ $# -eq 0 ] && ccenv__has_fzf; then
+    ccenv__interactive_use
+    return $?
+  fi
+  ccenv__use "$@"
+}
+
+ccenv__print_help() {
+  cat <<'EOF'
+Usage: ccenv [--env-file <path>] [--local] <command> [args]
+
+  list                 # show available env names (from config)
+  use <name>           # switch current shell to this env (persists across shells)
+  reload [<name>]      # (optionally switch) then restart the shell
+  reload-config        # re-source env sets file without restarting the shell
+  show                 # print managed vars (masked for secrets)
+  version              # print ccenv script version
+  current              # print active env name
+  clear|default        # switch to the empty default env
+
+Options:
+  -e, --env-file <path>   use a specific claude-code-env-sets.sh (overrides env var)
+  -l, --local             do not persist change; affects only current shell
+EOF
+}
+
+ccenv__dispatch() {
+  local cmd="$1"
+  shift || true
+  case "$cmd" in
+    list)      ccenv__list ;;
+    use)       ccenv__command_use "$@" ;;
+    reload)    ccenv__reload "$@" ;;
+    reload-config) ccenv__reload_config ;;
+    show)      ccenv__show ;;
+    version)   printf '%s\n' "${CCENV_VERSION:-dev}" ;;
+    current)   printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
+    clear|default) ccenv__use default ;;
+    help|-h|--help) ccenv__print_help ;;
+    *) ccenv__error "$CCENV_ERR_UNKNOWN_CMD" "unknown command: $cmd (see ccenv help)" ;;
+  esac
 }
 
 ccenv() {
@@ -412,7 +635,8 @@ ccenv() {
         if [ -n "${2:-}" ]; then
           CCENV_ENV_FILE_CLI="$2"; export CLAUDE_ENV_FILE="$CCENV_ENV_FILE_CLI"; shift 2
         else
-          cc__err "missing path after $1"; return 2
+          ccenv__error "$CCENV_ERR_MISSING_ARG" "missing path after $1"
+          return $CCENV_ERR_MISSING_ARG
         fi ;;
       --local|-l)
         CCENV_LOCAL_ONLY=1; shift ;;
@@ -422,41 +646,12 @@ ccenv() {
     esac
   done
   # If no command and fzf is available, open interactive menu
-  if [ $# -eq 0 ] && cc__has_fzf; then
-    cc__interactive_root
+  if [ $# -eq 0 ] && ccenv__has_fzf; then
+    ccenv__interactive_root
     return $?
   fi
   local cmd="${1:-help}"; [ $# -gt 0 ] && shift
-  case "$cmd" in
-    list)      cc__list ;;
-    use)
-      if [ $# -eq 0 ] && cc__has_fzf; then
-        cc__interactive_use
-      else
-        cc__use "$@"
-      fi
-      ;;
-    reload)    cc__reload "$@" ;;
-    show)      cc__show ;;
-    current)   printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
-    clear|default) cc__use default ;;
-    help|-h|--help)
-      cat <<'EOF'
-Usage: ccenv [--env-file <path>] [--local] <command> [args]
-
-  list                 # show available env names (from config)
-  use <name>           # switch current shell to this env (persists across shells)
-  reload [<name>]      # (optionally switch) then restart the shell
-  show                 # print managed vars (masked for secrets)
-  current              # print active env name
-  clear|default        # switch to the empty default env
-\nOptions:
-  -e, --env-file <path>   use a specific claude-code-env-sets.sh (overrides env var)
-  -l, --local             do not persist change; affects only current shell
-EOF
-      ;;
-    *) cc__err "unknown command: $cmd (see ccenv help)"; return 1 ;;
-  esac
+  ccenv__dispatch "$cmd" "$@"
 }
 
 # (Config is sourced on demand; avoid double-sourcing here.)
@@ -464,19 +659,19 @@ EOF
 
 # Initialize default env once per shell
 if [ -z "${CLAUDE_ENV_ACTIVE:-}" ]; then
-  cc__source_envfile
-  # Try to load saved state first, otherwise use default
-  saved_env="$(cc__load_state)"
-  if [ -n "$saved_env" ]; then
-    cc__use "$saved_env" >/dev/null 2>&1 || {
-      cc__unset_managed
-      export CLAUDE_ENV_ACTIVE="default"
-    }
+  ccenv__source_envfile_once || true
+  saved_env="$(ccenv__load_state)"
+  if [ -n "$saved_env" ] && ccenv__use "$saved_env" >/dev/null 2>&1; then
+    :
   else
-    cc__use "$CLAUDE_ENV_DEFAULT" >/dev/null 2>&1 || {
-      cc__unset_managed
+    if [ -n "$saved_env" ]; then
+      printf 'ccenv: failed to restore saved environment "%s", falling back to default\n' "$saved_env" >&2
+    fi
+    if ! ccenv__use "$CLAUDE_ENV_DEFAULT" >/dev/null 2>&1; then
+      printf 'ccenv: failed to apply default environment "%s"; clearing managed variables\n' "$CLAUDE_ENV_DEFAULT" >&2
+      ccenv__unset_managed
       export CLAUDE_ENV_ACTIVE="default"
-    }
+    fi
   fi
   unset saved_env
 fi
