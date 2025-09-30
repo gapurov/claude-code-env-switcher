@@ -391,7 +391,7 @@ ccenv__interactive_root() {
   local choice="${sel%%$sep*}"
   [ -z "$choice" ] && return 0
   case "$choice" in
-    clear) CCENV_LOCAL_ONLY=0 ccenv__use default ;;
+    reset) CCENV_LOCAL_ONLY=0 ccenv__use default ;;
     reload) ccenv__reload ;;
     select) ccenv__interactive_use ;;
     *) return 0 ;;
@@ -554,32 +554,7 @@ ccenv__reload() {
   exec "$shprog" -l
 }
 
-ccenv__show() {
-  local status=0
-  if ! ccenv__source_envfile_once; then
-    status=$CCENV_ERR_FILE_NOT_FOUND
-  fi
-  printf 'active: %s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  if [ -z "${CCENV_MANAGED_VARS:-}" ]; then
-    printf '  (no CCENV_MANAGED_VARS configured)\n'
-    return $status
-  fi
-  local v val
-  while IFS= read -r v; do
-    [ -z "$v" ] && continue
-    val="$(ccenv__var_get "$v")"
-    if [ -n "$val" ]; then
-      case "$v" in *KEY*|*TOKEN*|*SECRET*) printf '  %s=' "$v"; ccenv__mask "$val"; printf '\n' ;;
-                    *) printf '  %s=%s\n' "$v" "$val" ;;
-      esac
-    else
-      printf '  %s=<unset>\n' "$v"
-    fi
-  done <<EOF
-$(ccenv__iterate_array CCENV_MANAGED_VARS)
-EOF
-  return $status
-}
+
 
 ccenv__command_use() {
   if [ $# -eq 0 ] && ccenv__has_fzf; then
@@ -589,18 +564,17 @@ ccenv__command_use() {
   ccenv__use "$@"
 }
 
+
+
 ccenv__print_help() {
   cat <<'EOF'
 Usage: ccenv [--env-file <path>] [--local] <command> [args]
 
-  list                 # show available env names (from config)
   use <name>           # switch current shell to this env (persists across shells)
   reload [<name>]      # (optionally switch) then restart the shell
-  reload-config        # re-source env sets file without restarting the shell
-  show                 # print managed vars (masked for secrets)
+  reset|clear|default # switch to the empty default env
   version              # print ccenv script version
   current              # print active env name
-  clear|default        # switch to the empty default env
 
 Options:
   -e, --env-file <path>   use a specific claude-code-env-sets.sh (overrides env var)
@@ -615,13 +589,11 @@ ccenv__dispatch() {
     list)      ccenv__list ;;
     use)       ccenv__command_use "$@" ;;
     reload)    ccenv__reload "$@" ;;
-    reload-config) ccenv__reload_config ;;
-    show)      ccenv__show ;;
+    reset|clear|default) ccenv__use default ;;
     version)   printf '%s\n' "${CCENV_VERSION:-dev}" ;;
     current)   printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
-    clear|default) ccenv__use default ;;
     help|-h|--help) ccenv__print_help ;;
-    *) ccenv__error "$CCENV_ERR_UNKNOWN_CMD" "unknown command: $cmd (see ccenv help)" ;;
+    *) ccenv__error "$CCENV_ERR_UNKNOWN_CMD" "unknown command: $cmd" ;;
   esac
 }
 

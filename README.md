@@ -27,12 +27,13 @@ cp claude-code-env-sets.sh ~/.claude/claude-code-env-sets.sh
 ccenv list # show environments (from claude-code-env-sets.sh)
 ccenv       # with fzf installed: interactive menu to pick a command
 ccenv use   # with fzf installed: interactive env picker (includes --local)
-ccenv -e ./project/claude-code-env-sets.sh list # use a custom config path just for this shell
+ccenv -e ./project/claude-code-env-sets.sh use anthropic # use a custom config path just for this shell
 ccenv use anthropic # switch current shell
 ccenv --local use anthropic # switch only this shell (do not persist)
-ccenv show # print managed vars (masked)
 ccenv reload # re-exec Zsh and re-read rc files
-ccenv clear # return to empty default
+ccenv reset # return to empty default
+ccenv version # print script version
+ccenv current # print active env name
 ```
 
 ### Options
@@ -44,9 +45,9 @@ Commands:
   list                 Show available env names
   use <name>           Switch current shell to this env (persistent by default)
   reload [<name>]      (Optionally switch) then restart the shell (login)
-  show                 Print managed vars (masked for secrets)
+  reset|clear|default  Switch to the empty default env
+  version              Print ccenv script version
   current              Print active env name
-  clear|default        Switch to the empty default env
 
 Flags:
   -e, --env-file <path>  Use a specific claude-code-env-sets.sh for this shell
