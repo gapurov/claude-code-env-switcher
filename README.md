@@ -36,6 +36,16 @@ ccenv version # print script version
 ccenv current # print active env name
 ```
 
+### Included sample environments
+
+The bundled `example-claude-code-env-sets.sh` demonstrates how to configure several Anthropic-compatible providers:
+
+- `anthropic`: standard Anthropic endpoint (`https://api.anthropic.com`).
+- `GLM-4.7`: Zhipu's GLM proxy (`https://api.z.ai/api/anthropic`) with GLM model defaults.
+- `deepseek`: DeepSeek proxy (`https://api.deepseek.com/anthropic`).
+- `openrouter`: OpenRouter Anthropic-compatible endpoint (`https://openrouter.ai/api/anthropic`).
+- `minimax`: MiniMax Anthropic-compatible endpoint (`https://api.minimax.io/anthropic`) with `MiniMax-M2.1` set for all Claude model variants, a longer timeout (`API_TIMEOUT_MS=3000000`), and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
+
 ### Options
 
 ```text

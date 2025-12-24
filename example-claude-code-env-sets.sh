@@ -8,11 +8,11 @@
 
 # List available environments (zsh array shown; bash array also works)
 typeset -a CCENV_ENV_NAMES
-CCENV_ENV_NAMES=( default anthropic GLM-4.7 deepseek openrouter )
+CCENV_ENV_NAMES=( default anthropic GLM-4.7 deepseek openrouter minimax )
 
 # Vars to clear on every switch (keep it minimal)
 typeset -a CCENV_MANAGED_VARS
-CCENV_MANAGED_VARS=( ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL )
+CCENV_MANAGED_VARS=( ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC )
 
 # Optional globals applied for every env before the specific env
 ccenv_globals() {
@@ -52,6 +52,19 @@ ccenv_apply_env() {
       # OpenRouter Anthropic-compatible endpoint
       export ANTHROPIC_BASE_URL="https://openrouter.ai/api/anthropic"
       export ANTHROPIC_AUTH_TOKEN="sk-or-REPLACE_ME"
+      ;;
+
+    minimax)
+      # MiniMax Anthropic-compatible endpoint
+      export ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
+      export ANTHROPIC_AUTH_TOKEN="sk-minimax-REPLACE_ME"
+      export ANTHROPIC_MODEL="MiniMax-M2.1"
+      export ANTHROPIC_SMALL_FAST_MODEL="MiniMax-M2.1"
+      export ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.1"
+      export ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.1"
+      export ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.1"
+      export API_TIMEOUT_MS="3000000"
+      export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
       ;;
 
     *)
