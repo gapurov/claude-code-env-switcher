@@ -73,7 +73,7 @@ ccenv__resolve_env_file() {
   printf '%s\n' "$candidate"
 }
 
-ccenv__env_dir() {
+ccenv__global_env_dir() {
   local env_directory="" env_file=""
   if [ -n "${CCENV_ENV_DIR:-}" ]; then
     env_directory="$(ccenv__expand_tilde "$CCENV_ENV_DIR")"
@@ -91,15 +91,57 @@ ccenv__list_env_files() {
   local env_directory="$1"
   [ -z "$env_directory" ] && return 0
   if command -v fd >/dev/null 2>&1; then
-    fd -a -H -t f -g '.env.*' -E '*.example' "$env_directory" -x basename -a {} 2>/dev/null | LC_ALL=C sort
+    fd -H -I -t f -g '.env.*' -E '*.example' -d 1 "$env_directory" -x basename -a {} 2>/dev/null | LC_ALL=C sort
   else
     find "$env_directory" -maxdepth 1 -type f -name '.env.*' ! -name '*.example' -print 2>/dev/null | sed 's#.*/##' | LC_ALL=C sort
   fi
 }
 
+ccenv__dir_has_env_files() {
+  local env_directory="$1" found_env_file=""
+  [ -z "$env_directory" ] && return 1
+  if ccenv__list_env_files "$env_directory" | { read -r found_env_file; }; then
+    [ -n "$found_env_file" ] && return 0
+  fi
+  return 1
+}
+
+ccenv__local_env_dir() {
+  local env_directory=""
+  env_directory="$(pwd -P 2>/dev/null || pwd)"
+  if ccenv__dir_has_env_files "$env_directory"; then
+    printf '%s\n' "$env_directory"
+  fi
+}
+
+ccenv__env_dirs() {
+  local local_env_directory global_env_directory
+  local_env_directory="$(ccenv__local_env_dir 2>/dev/null || true)"
+  global_env_directory="$(ccenv__global_env_dir 2>/dev/null || true)"
+  [ -n "$local_env_directory" ] && printf '%s\n' "$local_env_directory"
+  if [ -n "$global_env_directory" ] && [ "$global_env_directory" != "$local_env_directory" ]; then
+    printf '%s\n' "$global_env_directory"
+  fi
+}
+
+ccenv__env_dir_for_name() {
+  local env_name="$1" local_env_directory global_env_directory
+  local_env_directory="$(ccenv__local_env_dir 2>/dev/null || true)"
+  if [ -n "$local_env_directory" ] && [ -r "$local_env_directory/.env.$env_name" ]; then
+    printf '%s\n' "$local_env_directory"
+    return 0
+  fi
+  global_env_directory="$(ccenv__global_env_dir 2>/dev/null || true)"
+  if [ -n "$global_env_directory" ] && [ -r "$global_env_directory/.env.$env_name" ]; then
+    printf '%s\n' "$global_env_directory"
+    return 0
+  fi
+  return 1
+}
+
 ccenv__env_file_for() {
   local env_name="$1" env_directory
-  env_directory="$(ccenv__env_dir 2>/dev/null || true)"
+  env_directory="$(ccenv__env_dir_for_name "$env_name" 2>/dev/null || true)"
   [ -z "$env_directory" ] && return 1
   printf '%s/.env.%s\n' "$env_directory" "$env_name"
 }
@@ -476,17 +518,17 @@ ccenv__each_envname() {
     ccenv__iterate_array CCENV_ENV_NAMES
     return 0
   fi
-  local env_directory env_file
-  env_directory="$(ccenv__env_dir 2>/dev/null || true)"
-  [ -z "$env_directory" ] && return 0
-  while IFS= read -r env_file; do
-    [ -z "$env_file" ] && continue
-    case "$env_file" in
-      .env.*) printf '%s\n' "${env_file#.env.}" ;;
-    esac
-  done <<EOF
-$(ccenv__list_env_files "$env_directory")
+  local env_directory
+  {
+    while IFS= read -r env_directory; do
+      [ -z "$env_directory" ] && continue
+      ccenv__list_env_files "$env_directory"
+    done <<EOF
+$(ccenv__env_dirs)
 EOF
+  } | awk '
+    { sub(/^\.env\./, "", $0); if ($0 != "" && !seen[$0]++) print }
+  '
 }
 
 ccenv__env_known() {
