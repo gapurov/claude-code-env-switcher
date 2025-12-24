@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude environment switcher
-# Version: 0.3.0
+# Version: 2.0.0
 # Usage after sourcing:
 #   ccenv [--env-file <path>] [--local] <command> [args]
 # Commands: list | use <name> | reload [name] | show | current | clear
@@ -18,7 +18,7 @@
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
 # Script version (exposed via `ccenv version`)
-CCENV_VERSION="0.3.0"
+CCENV_VERSION="2.0.0"
 
 # Default environment name when none is active
 : "${CLAUDE_ENV_DEFAULT:=default}"
