@@ -12,8 +12,8 @@ cp claude-code-env-switcher.sh ~/.claude/
 # Source it from your shell rc (zsh shown; bash uses ~/.bashrc):
 echo '[[ -r ~/.claude/claude-code-env-switcher.sh ]] && source ~/.claude/claude-code-env-switcher.sh' >> ~/.zshrc
 
-# Create your env config (recommended global path; project-local ./claude-code-env-sets.sh also works):
-cp claude-code-env-sets.sh ~/.claude/claude-code-env-sets.sh
+# Create your env config (recommended global path; project-local ./claude-code-env-config.sh also works):
+cp claude-code-env-config.sh ~/.claude/claude-code-env-config.sh
 # Create one or more .env.<provider> files next to it (or set CCENV_ENV_DIR).
 # Example templates live in this repo as .env.<provider>.example:
 cp .env.anthropic.example ~/.claude/.env.anthropic
@@ -21,7 +21,7 @@ chmod 600 ~/.claude/.env.anthropic
 
 # Optional: customize (set in your shell rc before sourcing)
 # export CLAUDE_ENV_DEFAULT=default       # name of the default environment
-# export CLAUDE_ENV_FILE=~/.claude/claude-code-env-sets.sh  # single path override
+# export CLAUDE_ENV_FILE=~/.claude/claude-code-env-config.sh  # single path override
 ```
 
 ## Use it
@@ -30,7 +30,7 @@ chmod 600 ~/.claude/.env.anthropic
 ccenv list # show environments (from .env.* files)
 ccenv       # with fzf installed: interactive menu to pick a command
 ccenv use   # with fzf installed: interactive env picker (includes --local)
-ccenv -e ./project/claude-code-env-sets.sh use anthropic # use a custom config path just for this shell
+ccenv -e ./project/claude-code-env-config.sh use anthropic # use a custom config path just for this shell
 ccenv use anthropic # switch current shell
 ccenv --local use anthropic # switch only this shell (do not persist)
 ccenv reload # re-exec Zsh and re-read rc files
@@ -41,7 +41,7 @@ ccenv current # print active env name
 
 ### Included sample environments
 
-The bundled `example-claude-code-env-sets.sh` and `.env.<provider>.example` files include templates for several Anthropic-compatible providers:
+The bundled `example-claude-code-env-config.sh` and `.env.<provider>.example` files include templates for several Anthropic-compatible providers:
 
 - `anthropic`: standard Anthropic endpoint (`https://api.anthropic.com`).
 - `GLM-4.7`: Zhipu's GLM proxy (`https://api.z.ai/api/anthropic`) with GLM model defaults.
@@ -63,7 +63,7 @@ Commands:
   current              Print active env name
 
 Flags:
-  -e, --env-file <path>  Use a specific claude-code-env-sets.sh for this shell
+  -e, --env-file <path>  Use a specific claude-code-env-config.sh for this shell
   -l, --local            Do not persist the change; only affect current shell
 ```
 

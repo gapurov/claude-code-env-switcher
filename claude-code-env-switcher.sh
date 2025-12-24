@@ -8,7 +8,7 @@
 # --local (-l) applies the change only to the current shell session and
 # does not persist it to the state file used by new shells.
 #
-# The config (claude-code-env-sets.sh) provides:
+# The config (claude-code-env-config.sh) provides:
 #   - CCENV_ENV_NAMES        : list/array of available env names (optional)
 #   - CCENV_MANAGED_VARS     : list/array of vars to clear on switch
 #   - ccenv_globals()        : optional hook run before each env apply
@@ -48,11 +48,11 @@ ccenv__script_dir() {
 }
 
 ccenv__default_env_file() {
-  printf '%s/claude-code-env-sets.sh' "$(ccenv__script_dir)"
+  printf '%s/claude-code-env-config.sh' "$(ccenv__script_dir)"
 }
 
 ccenv__state_file() {
-  printf '%s/.claude-code-env-state' "$(ccenv__script_dir)"
+  printf '%s/.claude-code-env-global-active' "$(ccenv__script_dir)"
 }
 
 ccenv__expand_tilde() {
@@ -549,12 +549,12 @@ ccenv__save_state() {
 
 # Load the saved environment from the state file
 ccenv__load_state() {
-  local state_file
+  local state_file saved_env_name
   state_file="$(ccenv__state_file)"
   if [ -r "$state_file" ]; then
-    local _s
-    IFS= read -r _s < "$state_file" || true
-    [ -n "${_s+x}" ] && printf '%s\n' "$_s"
+    IFS= read -r saved_env_name < "$state_file" || true
+    [ -n "${saved_env_name+x}" ] && printf '%s\n' "$saved_env_name"
+    return 0
   fi
 }
 
@@ -653,7 +653,7 @@ Usage: ccenv [--env-file <path>] [--local] <command> [args]
   current              # print active env name
 
 Options:
-  -e, --env-file <path>   use a specific claude-code-env-sets.sh (overrides env var)
+  -e, --env-file <path>   use a specific claude-code-env-config.sh (overrides env var)
   -l, --local             do not persist change; affects only current shell
 EOF
 }
