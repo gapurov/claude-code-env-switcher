@@ -14,7 +14,10 @@ echo '[[ -r ~/.claude/claude-code-env-switcher.sh ]] && source ~/.claude/claude-
 
 # Create your env config (recommended global path; project-local ./claude-code-env-sets.sh also works):
 cp claude-code-env-sets.sh ~/.claude/claude-code-env-sets.sh
-# Edit ~/.claude/claude-code-env-sets.sh and replace placeholder tokens/URLs
+# Create one or more .env.<provider> files next to it (or set CCENV_ENV_DIR).
+# Example templates live in this repo as .env.<provider>.example:
+cp .env.anthropic.example ~/.claude/.env.anthropic
+chmod 600 ~/.claude/.env.anthropic
 
 # Optional: customize (set in your shell rc before sourcing)
 # export CLAUDE_ENV_DEFAULT=default       # name of the default environment
@@ -24,7 +27,7 @@ cp claude-code-env-sets.sh ~/.claude/claude-code-env-sets.sh
 ## Use it
 
 ```bash
-ccenv list # show environments (from claude-code-env-sets.sh)
+ccenv list # show environments (from .env.* files)
 ccenv       # with fzf installed: interactive menu to pick a command
 ccenv use   # with fzf installed: interactive env picker (includes --local)
 ccenv -e ./project/claude-code-env-sets.sh use anthropic # use a custom config path just for this shell
@@ -38,7 +41,7 @@ ccenv current # print active env name
 
 ### Included sample environments
 
-The bundled `example-claude-code-env-sets.sh` demonstrates how to configure several Anthropic-compatible providers:
+The bundled `example-claude-code-env-sets.sh` and `.env.<provider>.example` files include templates for several Anthropic-compatible providers:
 
 - `anthropic`: standard Anthropic endpoint (`https://api.anthropic.com`).
 - `GLM-4.7`: Zhipu's GLM proxy (`https://api.z.ai/api/anthropic`) with GLM model defaults.

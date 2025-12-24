@@ -1,20 +1,64 @@
 #!/usr/bin/env bash
 
-# User environment definitions for claude-code-env-switcher
-# Replace the placeholder tokens/URLs below with your real values when ready.
+# User environment definitions for claude-code-env-switcher.
+# Replace the placeholder tokens/URLs in your .env.<provider> files.
 
 # Keep the default environment pointed at Anthropic unless you override it before sourcing.
 : "${CLAUDE_ENV_DEFAULT:=anthropic}"
 
-# List available environments (zsh array shown; bash array also works)
-typeset -a CCENV_ENV_NAMES
-CCENV_ENV_NAMES=( default anthropic GLM-4.7 deepseek openrouter minimax )
+# Optional: override where .env.<provider> files live.
+# CCENV_ENV_DIR="$HOME/.claude/envs"
 
-# Vars to clear on every switch (keep it minimal)
+# Example .env.anthropic.example (copy to .env.anthropic):
+#   CCENV_DISPLAY_NAME="Anthropic"
+#   ANTHROPIC_BASE_URL="https://api.anthropic.com"
+#   ANTHROPIC_AUTH_TOKEN="sk-ant-REPLACE_ME"
+#
+# Example .env.GLM-4.7.example (copy to .env.GLM-4.7):
+#   CCENV_DISPLAY_NAME="GLM-4.7"
+#   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
+#   ANTHROPIC_AUTH_TOKEN="sk-glm-api-token"
+#   ANTHROPIC_MODEL="GLM-4.7"
+#   ANTHROPIC_DEFAULT_HAIKU_MODEL="GLM-4.5-Air"
+#   ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-4.7"
+#   ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-4.7"
+#
+# Example .env.deepseek.example (copy to .env.deepseek):
+#   CCENV_DISPLAY_NAME="DeepSeek"
+#   ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
+#   ANTHROPIC_AUTH_TOKEN="sk-deepseek-REPLACE_ME"
+#
+# Example .env.openrouter.example (copy to .env.openrouter):
+#   CCENV_DISPLAY_NAME="OpenRouter"
+#   ANTHROPIC_BASE_URL="https://openrouter.ai/api/anthropic"
+#   ANTHROPIC_AUTH_TOKEN="sk-or-REPLACE_ME"
+#
+# Example .env.minimax.example (copy to .env.minimax):
+#   CCENV_DISPLAY_NAME="MiniMax"
+#   ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
+#   ANTHROPIC_AUTH_TOKEN="sk-minimax-REPLACE_ME"
+#   ANTHROPIC_MODEL="MiniMax-M2.1"
+#   ANTHROPIC_SMALL_FAST_MODEL="MiniMax-M2.1"
+#   ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.1"
+#   ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.1"
+#   ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.1"
+#   API_TIMEOUT_MS="3000000"
+#   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+# Vars to clear on every switch (include vars you set in .env.* files).
 typeset -a CCENV_MANAGED_VARS
-CCENV_MANAGED_VARS=( ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL ANTHROPIC_MODEL ANTHROPIC_DEFAULT_HAIKU_MODEL ANTHROPIC_DEFAULT_SONNET_MODEL ANTHROPIC_DEFAULT_OPUS_MODEL ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC )
+CCENV_MANAGED_VARS=(
+  ANTHROPIC_AUTH_TOKEN
+  ANTHROPIC_BASE_URL
+  ANTHROPIC_MODEL
+  ANTHROPIC_DEFAULT_HAIKU_MODEL
+  ANTHROPIC_DEFAULT_SONNET_MODEL
+  ANTHROPIC_DEFAULT_OPUS_MODEL
+  ANTHROPIC_SMALL_FAST_MODEL
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+)
 
-# Optional globals applied for every env before the specific env
+# Optional globals applied for every env before the specific env.
 ccenv_globals() {
   : "${API_TIMEOUT_MS:=600000}"
   export API_TIMEOUT_MS
@@ -22,53 +66,17 @@ ccenv_globals() {
 
 # Apply an environment by name. Return non-zero for unknown.
 ccenv_apply_env() {
-  case "$1" in
-    default)
-      # leave everything cleared (baseline)
-      return 0
-      ;;
+  local name="$1"
+  [ "$name" = "default" ] && return 0
 
-    anthropic)
-      export ANTHROPIC_BASE_URL="https://api.anthropic.com"
-      export ANTHROPIC_AUTH_TOKEN="sk-ant-REPLACE_ME"
-      ;;
+  local dir file had_allexport=0
+  dir="${CCENV_ENV_DIR:-$(cd -P -- "$(dirname -- "$CCENV_ENV_FILE_PICKED")" 2>/dev/null && pwd)}"
+  file="$dir/.env.$name"
+  [ -r "$file" ] || return 2
 
-    GLM-4.7)
-      export ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
-      export ANTHROPIC_AUTH_TOKEN="sk-glm-api-token"
-      export ANTHROPIC_MODEL="GLM-4.7"
-      export ANTHROPIC_DEFAULT_HAIKU_MODEL="GLM-4.5-Air"
-      export ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-4.7"
-      export ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-4.7"
-      ;;
-
-    deepseek)
-      # DeepSeek Anthropic-compatible proxy path
-      export ANTHROPIC_BASE_URL="https://api.deepseek.com/anthropic"
-      export ANTHROPIC_AUTH_TOKEN="sk-deepseek-REPLACE_ME"
-      ;;
-
-    openrouter)
-      # OpenRouter Anthropic-compatible endpoint
-      export ANTHROPIC_BASE_URL="https://openrouter.ai/api/anthropic"
-      export ANTHROPIC_AUTH_TOKEN="sk-or-REPLACE_ME"
-      ;;
-
-    minimax)
-      # MiniMax Anthropic-compatible endpoint
-      export ANTHROPIC_BASE_URL="https://api.minimax.io/anthropic"
-      export ANTHROPIC_AUTH_TOKEN="sk-minimax-REPLACE_ME"
-      export ANTHROPIC_MODEL="MiniMax-M2.1"
-      export ANTHROPIC_SMALL_FAST_MODEL="MiniMax-M2.1"
-      export ANTHROPIC_DEFAULT_SONNET_MODEL="MiniMax-M2.1"
-      export ANTHROPIC_DEFAULT_OPUS_MODEL="MiniMax-M2.1"
-      export ANTHROPIC_DEFAULT_HAIKU_MODEL="MiniMax-M2.1"
-      export API_TIMEOUT_MS="3000000"
-      export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-      ;;
-
-    *)
-      return 2
-      ;;
-  esac
+  case $- in *a*) had_allexport=1;; esac
+  set -a
+  # shellcheck disable=SC1090
+  . "$file"
+  [ "$had_allexport" -eq 0 ] && set +a
 }

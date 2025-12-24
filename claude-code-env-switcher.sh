@@ -9,10 +9,12 @@
 # does not persist it to the state file used by new shells.
 #
 # The config (claude-code-env-sets.sh) provides:
-#   - CCENV_ENV_NAMES        : list/array of available env names
+#   - CCENV_ENV_NAMES        : list/array of available env names (optional)
 #   - CCENV_MANAGED_VARS     : list/array of vars to clear on switch
 #   - ccenv_globals()        : optional hook run before each env apply
-#   - ccenv_apply_env <name> : required function; returns non‑zero if unknown
+#   - ccenv_apply_env <name> : required function; returns non-zero if unknown
+# If CCENV_ENV_NAMES is not set, names are auto-discovered from .env.* files
+# in CCENV_ENV_DIR or alongside the config file.
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
 # Script version (exposed via `ccenv version`)
@@ -69,6 +71,66 @@ ccenv__resolve_env_file() {
   fi
   candidate="$(ccenv__expand_tilde "$candidate")"
   printf '%s\n' "$candidate"
+}
+
+ccenv__env_dir() {
+  local env_directory="" env_file=""
+  if [ -n "${CCENV_ENV_DIR:-}" ]; then
+    env_directory="$(ccenv__expand_tilde "$CCENV_ENV_DIR")"
+  else
+    env_file="${CCENV_ENV_FILE_PICKED:-}"
+    [ -z "$env_file" ] && env_file="$(ccenv__resolve_env_file 2>/dev/null || true)"
+    if [ -n "$env_file" ]; then
+      env_directory="$(cd -P -- "$(dirname -- "$env_file")" 2>/dev/null && pwd)"
+    fi
+  fi
+  [ -n "$env_directory" ] && [ -d "$env_directory" ] && printf '%s\n' "$env_directory"
+}
+
+ccenv__list_env_files() {
+  local env_directory="$1"
+  [ -z "$env_directory" ] && return 0
+  if command -v fd >/dev/null 2>&1; then
+    fd -a -H -t f -g '.env.*' -E '*.example' "$env_directory" -x basename -a {} 2>/dev/null | LC_ALL=C sort
+  else
+    find "$env_directory" -maxdepth 1 -type f -name '.env.*' ! -name '*.example' -print 2>/dev/null | sed 's#.*/##' | LC_ALL=C sort
+  fi
+}
+
+ccenv__env_file_for() {
+  local env_name="$1" env_directory
+  env_directory="$(ccenv__env_dir 2>/dev/null || true)"
+  [ -z "$env_directory" ] && return 1
+  printf '%s/.env.%s\n' "$env_directory" "$env_name"
+}
+
+ccenv__display_name_for() {
+  local env_name="$1" env_file raw_display_name trimmed_display_name
+  env_file="$(ccenv__env_file_for "$env_name" 2>/dev/null || true)"
+  [ -r "$env_file" ] || return 0
+  raw_display_name="$(awk '
+    /^[[:space:]]*(export[[:space:]]+)?CCENV_DISPLAY_NAME[[:space:]]*=/ {
+      sub(/^[[:space:]]*(export[[:space:]]+)?CCENV_DISPLAY_NAME[[:space:]]*=/, "");
+      print; exit
+    }' "$env_file" 2>/dev/null)"
+  [ -z "$raw_display_name" ] && return 0
+  trimmed_display_name="${raw_display_name#"${raw_display_name%%[![:space:]]*}"}"
+  trimmed_display_name="${trimmed_display_name%"${trimmed_display_name##*[![:space:]]}"}"
+  case "$trimmed_display_name" in
+    \"*\") trimmed_display_name="${trimmed_display_name#\"}"; trimmed_display_name="${trimmed_display_name%\"}";;
+    \'*\') trimmed_display_name="${trimmed_display_name#\'}"; trimmed_display_name="${trimmed_display_name%\'}";;
+  esac
+  [ -n "$trimmed_display_name" ] && printf '%s\n' "$trimmed_display_name"
+}
+
+ccenv__label_for() {
+  local env_name="$1" display_name
+  display_name="$(ccenv__display_name_for "$env_name")"
+  if [ -n "$display_name" ] && [ "$display_name" != "$env_name" ]; then
+    printf '%s (%s)\n' "$display_name" "$env_name"
+  else
+    printf '%s\n' "$env_name"
+  fi
 }
 
 CCENV__CONFIG_PATH=""
@@ -315,13 +377,14 @@ ccenv__has_fzf() {
 ccenv__interactive_list() {
   ccenv__source_envfile_once || true
   command -v fzf >/dev/null 2>&1 || { ccenv__list; return 0; }
-  local lines=() n active
-  active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  lines+=( "$( [ "$active" = "default" ] && printf '* ' || printf '  ' )default" )
-  while IFS= read -r n; do
-    [ -z "$n" ] && continue
-    [ "$n" = "default" ] && continue
-    if [ "$n" = "$active" ]; then lines+=( "* $n" ); else lines+=( "  $n" ); fi
+  local lines=() env_name active_env display_label
+  active_env="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
+  lines+=( "$( [ "$active_env" = "default" ] && printf '* ' || printf '  ' )default" )
+  while IFS= read -r env_name; do
+    [ -z "$env_name" ] && continue
+    [ "$env_name" = "default" ] && continue
+    display_label="$(ccenv__label_for "$env_name")"
+    if [ "$env_name" = "$active_env" ]; then lines+=( "* $display_label" ); else lines+=( "  $display_label" ); fi
   done <<EOF
 $(ccenv__each_envname)
 EOF
@@ -341,30 +404,31 @@ ccenv__interactive_use() {
   fi
   local dim=$'\033[2m' normal=$'\033[0m'
   local sep=$'\037'
-  local choices=() n sel name make_local=0
+  local choices=() env_name selection selected_name make_local=0 display_label
   local header="Select environment (--local to not persist) | Active: $(ccenv__active_label)"
   choices+=( "default${sep}default" )
-  while IFS= read -r n; do
-    [ -z "$n" ] && continue
-    [ "$n" = "default" ] && continue
-    choices+=( "${n}${sep}${n}" )
-    choices+=( "${n}|local${sep}${n} --local ${dim}do not persist${normal}" )
+  while IFS= read -r env_name; do
+    [ -z "$env_name" ] && continue
+    [ "$env_name" = "default" ] && continue
+    display_label="$(ccenv__label_for "$env_name")"
+    choices+=( "${env_name}${sep}${display_label}" )
+    choices+=( "${env_name}|local${sep}${display_label} --local ${dim}do not persist${normal}" )
   done <<EOF
 $(ccenv__each_envname)
 EOF
-  sel=$(printf '%s\n' "${choices[@]}" | ccenv__fzf 'ccenv use> ' "$header" \
+  selection=$(printf '%s\n' "${choices[@]}" | ccenv__fzf 'ccenv use> ' "$header" \
     --with-nth=2 --delimiter="$sep") || return 130
-  local value="${sel%%$sep*}"
+  local value="${selection%%$sep*}"
   [ -z "$value" ] && return 0
   case "$value" in
-    *'|local') name="${value%|local}"; make_local=1 ;;
-    *) name="$value" ;;
+    *'|local') selected_name="${value%|local}"; make_local=1 ;;
+    *) selected_name="$value" ;;
   esac
-  [ -z "$name" ] && return 0
+  [ -z "$selected_name" ] && return 0
   if [ "$make_local" -eq 1 ]; then
-    CCENV_LOCAL_ONLY=1 ccenv__use "$name" && printf 'switched to %s (local)\n' "$name"
+    CCENV_LOCAL_ONLY=1 ccenv__use "$selected_name" && printf 'switched to %s (local)\n' "$selected_name"
   else
-    CCENV_LOCAL_ONLY=0 ccenv__use "$name" && printf 'switched to %s\n' "$name"
+    CCENV_LOCAL_ONLY=0 ccenv__use "$selected_name" && printf 'switched to %s\n' "$selected_name"
   fi
 }
 
@@ -407,17 +471,30 @@ ccenv__mask() {
   printf '%s…%s' "$first" "$last"
 }
 
-ccenv__each_envname() { ccenv__iterate_array CCENV_ENV_NAMES; }
+ccenv__each_envname() {
+  if [ -n "${CCENV_ENV_NAMES:-}" ]; then
+    ccenv__iterate_array CCENV_ENV_NAMES
+    return 0
+  fi
+  local env_directory env_file
+  env_directory="$(ccenv__env_dir 2>/dev/null || true)"
+  [ -z "$env_directory" ] && return 0
+  while IFS= read -r env_file; do
+    [ -z "$env_file" ] && continue
+    case "$env_file" in
+      .env.*) printf '%s\n' "${env_file#.env.}" ;;
+    esac
+  done <<EOF
+$(ccenv__list_env_files "$env_directory")
+EOF
+}
 
 ccenv__env_known() {
-  local candidate="$1" n
+  local candidate="$1" env_name
   [ "$candidate" = "default" ] && return 0
-  if [ -z "${CCENV_ENV_NAMES:-}" ]; then
-    return 1
-  fi
-  while IFS= read -r n; do
-    [ -z "$n" ] && continue
-    if [ "$n" = "$candidate" ]; then
+  while IFS= read -r env_name; do
+    [ -z "$env_name" ] && continue
+    if [ "$env_name" = "$candidate" ]; then
       return 0
     fi
   done <<EOF
@@ -487,18 +564,17 @@ ccenv__list() {
   if ! ccenv__source_envfile_once; then
     status=$CCENV_ERR_FILE_NOT_FOUND
   fi
-  local active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" n
+  local active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" env_name display_label
   [ "$active" = "default" ] && printf '* default\n' || printf '  default\n'
-  if [ -n "${CCENV_ENV_NAMES:-}" ]; then
-    # show config-declared names; keep user order
-    while IFS= read -r n; do
-      [ -z "$n" ] && continue
-      [ "$n" = "default" ] && continue
-      [ "$n" = "$active" ] && printf '* %s\n' "$n" || printf '  %s\n' "$n"
-    done <<EOF
+  # show config-declared names or auto-discovered env files
+  while IFS= read -r env_name; do
+    [ -z "$env_name" ] && continue
+    [ "$env_name" = "default" ] && continue
+    display_label="$(ccenv__label_for "$env_name")"
+    [ "$env_name" = "$active" ] && printf '* %s\n' "$display_label" || printf '  %s\n' "$display_label"
+  done <<EOF
 $(ccenv__each_envname)
 EOF
-  fi
   return $status
 }
 
