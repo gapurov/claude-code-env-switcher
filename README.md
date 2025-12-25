@@ -21,7 +21,7 @@ cp .env.cc.anthropic.example ~/.claude/.env.cc.anthropic
 chmod 600 ~/.claude/.env.cc.anthropic
 
 # Optional: customize (set in your shell rc before sourcing)
-# export CLAUDE_ENV_DEFAULT=default       # name of the default environment
+# export CLAUDE_ENV_DEFAULT=anthropic     # optional default env name (use "default" for base env files only)
 # export CLAUDE_ENV_FILE=~/.claude/claude-code-env-config.sh  # single path override
 ```
 
@@ -35,7 +35,7 @@ ccenv -e ./project/claude-code-env-config.sh use anthropic # use a custom config
 ccenv use anthropic # switch current shell
 ccenv --local use anthropic # switch only this shell (do not persist)
 ccenv reload # re-exec Zsh and re-read rc files
-ccenv reset # return to empty default
+ccenv reset # reset to base env files (.env/.env.cc)
 ccenv version # print script version
 ccenv current # print active env name
 ```
@@ -60,7 +60,7 @@ Commands:
   list                 Show available env names
   use <name>           Switch current shell to this env (persistent by default)
   reload [<name>]      (Optionally switch) then restart the shell (login)
-  reset|clear|default  Switch to the empty default env
+  reset|clear|default  Reset to base env files (.env/.env.cc)
   version              Print ccenv script version
   current              Print active env name
 
@@ -73,7 +73,7 @@ Flags:
 
 - if `fzf` is installed and running in a TTY, `ccenv` will open an interactive menu.
 - `ccenv` with no args opens an interactive menu of commands (simplified; local toggles live inside `use`).
-- `ccenv use` with no args opens an interactive picker of environments. For each non-default env you'll see both the normal and `--local` (do not persist) options. After selection, it prints the chosen environment.
+- `ccenv use` with no args opens an interactive picker of environments. For each env you'll see both the normal and `--local` (do not persist) options. After selection, it prints the chosen environment.
 - Selecting `list` from the interactive menu prints the environments (no fzf selection).
 
 ### Local vs. persistent switches

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude environment switcher
-# Version: 2.0.0
+# Version: 2.1.1
 # Usage after sourcing:
 #   ccenv [--env-file <path>] [--local] <command> [args]
 # Commands: list | use <name> | reload [name] | show | current | clear
@@ -18,9 +18,9 @@
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
 # Script version (exposed via `ccenv version`)
-CCENV_VERSION="2.0.0"
+CCENV_VERSION="2.1.1"
 
-# Default environment name when none is active
+# Default environment name when none is active (use "default" for base env files only)
 : "${CLAUDE_ENV_DEFAULT:=default}"
 
 
@@ -324,9 +324,9 @@ ccenv__active_label() {
   local model_disp="${ANTHROPIC_MODEL:-}"
   if [ -z "$model_disp" ] || [ "$model_disp" = "-" ]; then
     if [ "$active_env" = "default" ]; then
-      model_disp='default'
+      model_disp="defaults (anthropic)"
     else
-      model_disp='-'
+      model_disp="$active_env"
     fi
   fi
   if [ "${CLAUDE_ENV_IS_LOCAL:-0}" = "1" ]; then
@@ -461,10 +461,8 @@ ccenv__interactive_list() {
   command -v fzf >/dev/null 2>&1 || { ccenv__list; return 0; }
   local lines=() env_name active_env display_label
   active_env="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  lines+=( "$( [ "$active_env" = "default" ] && printf '* ' || printf '  ' )default" )
   while IFS= read -r env_name; do
     [ -z "$env_name" ] && continue
-    [ "$env_name" = "default" ] && continue
     display_label="$(ccenv__label_for "$env_name")"
     if [ "$env_name" = "$active_env" ]; then lines+=( "* $display_label" ); else lines+=( "  $display_label" ); fi
   done <<EOF
@@ -488,10 +486,8 @@ ccenv__interactive_use() {
   local sep=$'\037'
   local choices=() env_name selection selected_name make_local=0 display_label
   local header="Select environment (--local to not persist) | Active: $(ccenv__active_label)"
-  choices+=( "default${sep}default" )
   while IFS= read -r env_name; do
     [ -z "$env_name" ] && continue
-    [ "$env_name" = "default" ] && continue
     display_label="$(ccenv__label_for "$env_name")"
     choices+=( "${env_name}${sep}${display_label}" )
     choices+=( "${env_name}|local${sep}${display_label} --local ${dim}do not persist${normal}" )
@@ -525,8 +521,8 @@ ccenv__interactive_root() {
   local sep=$'\037'
   local opts=() sel
   local __active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}"
-  if [ "${__active}" != "default" ]; then
-    opts+=( "clear${sep}reset to default" )
+  if [ "$__active" != "default" ]; then
+    opts+=( "reset${sep}reset to defaults (anthropic)" )
   fi
   opts+=(
     "reload${sep}reload ${dim}shell${normal}"
@@ -537,7 +533,7 @@ ccenv__interactive_root() {
   local choice="${sel%%$sep*}"
   [ -z "$choice" ] && return 0
   case "$choice" in
-    reset) CCENV_LOCAL_ONLY=0 ccenv__use default ;;
+    reset) CCENV_LOCAL_ONLY=0 ccenv__reset_defaults ;;
     reload) ccenv__reload ;;
     select) ccenv__interactive_use ;;
     *) return 0 ;;
@@ -568,7 +564,6 @@ ccenv__each_envname() {
 
 ccenv__env_known() {
   local candidate="$1" env_name
-  [ "$candidate" = "default" ] && return 0
   while IFS= read -r env_name; do
     [ -z "$env_name" ] && continue
     if [ "$env_name" = "$candidate" ]; then
@@ -585,9 +580,6 @@ ccenv__validate_env_name() {
   if [ -z "$name" ]; then
     ccenv__error "$CCENV_ERR_MISSING_ARG" "usage: ccenv use <name>"
     return $CCENV_ERR_MISSING_ARG
-  fi
-  if [ "$name" = "default" ]; then
-    return 0
   fi
   if [ "${CCENV__CONFIG_STATUS:-}" != "ok" ]; then
     ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "environment config not loaded; see --env-file"
@@ -642,11 +634,9 @@ ccenv__list() {
     status=$CCENV_ERR_FILE_NOT_FOUND
   fi
   local active="${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" env_name display_label
-  [ "$active" = "default" ] && printf '* default\n' || printf '  default\n'
   # show config-declared names or auto-discovered env files
   while IFS= read -r env_name; do
     [ -z "$env_name" ] && continue
-    [ "$env_name" = "default" ] && continue
     display_label="$(ccenv__label_for "$env_name")"
     [ "$env_name" = "$active" ] && printf '* %s\n' "$display_label" || printf '  %s\n' "$display_label"
   done <<EOF
@@ -655,16 +645,37 @@ EOF
   return $status
 }
 
+ccenv__reset_defaults() {
+  if ! ccenv__source_envfile_once; then
+    return $CCENV_ERR_FILE_NOT_FOUND
+  fi
+
+  ccenv__unset_managed
+
+  # optional globals hook
+  if command -v ccenv_globals >/dev/null 2>&1; then ccenv_globals || true; fi
+
+  ccenv__apply_base_env_files
+
+  export CLAUDE_ENV_ACTIVE="default"
+  if [ "${CCENV_LOCAL_ONLY:-0}" = "1" ]; then
+    export CLAUDE_ENV_IS_LOCAL=1
+  else
+    export CLAUDE_ENV_IS_LOCAL=0
+    ccenv__save_state "default"
+  fi
+}
+
 ccenv__use() {
   local name="$1"
   [ -z "$name" ] && { ccenv__error "$CCENV_ERR_MISSING_ARG" "usage: ccenv use <name>"; return $CCENV_ERR_MISSING_ARG; }
 
   if [ "$name" = "default" ]; then
-    ccenv__source_envfile_once || true
-  else
-    if ! ccenv__source_envfile_once; then
-      return $CCENV_ERR_FILE_NOT_FOUND
-    fi
+    ccenv__reset_defaults
+    return $?
+  fi
+  if ! ccenv__source_envfile_once; then
+    return $CCENV_ERR_FILE_NOT_FOUND
   fi
 
   if ! ccenv__validate_env_name "$name"; then
@@ -676,16 +687,14 @@ ccenv__use() {
   # optional globals hook
   if command -v ccenv_globals >/dev/null 2>&1; then ccenv_globals || true; fi
 
-  if [ "$name" != "default" ]; then
-    ccenv__apply_base_env_files
-    if ! command -v ccenv_apply_env >/dev/null 2>&1; then
-      ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "missing ccenv_apply_env in config: $(ccenv__resolve_env_file 2>/dev/null || printf '?')"
-      return $CCENV_ERR_FILE_NOT_FOUND
-    fi
-    if ! ccenv_apply_env "$name"; then
-      ccenv__error "$CCENV_ERR_INVALID_ENV" "unknown env '$name' (see: ccenv list)"
-      return $CCENV_ERR_INVALID_ENV
-    fi
+  ccenv__apply_base_env_files
+  if ! command -v ccenv_apply_env >/dev/null 2>&1; then
+    ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "missing ccenv_apply_env in config: $(ccenv__resolve_env_file 2>/dev/null || printf '?')"
+    return $CCENV_ERR_FILE_NOT_FOUND
+  fi
+  if ! ccenv_apply_env "$name"; then
+    ccenv__error "$CCENV_ERR_INVALID_ENV" "unknown env '$name' (see: ccenv list)"
+    return $CCENV_ERR_INVALID_ENV
   fi
 
   export CLAUDE_ENV_ACTIVE="$name"
@@ -726,7 +735,7 @@ Usage: ccenv [--env-file <path>] [--local] <command> [args]
 
   use <name>           # switch current shell to this env (persists across shells)
   reload [<name>]      # (optionally switch) then restart the shell
-  reset|clear|default # switch to the empty default env
+  reset|clear|default # reset to defaults (base env files only)
   version              # print ccenv script version
   current              # print active env name
 
@@ -743,7 +752,7 @@ ccenv__dispatch() {
     list)      ccenv__list ;;
     use)       ccenv__command_use "$@" ;;
     reload)    ccenv__reload "$@" ;;
-    reset|clear|default) ccenv__use default ;;
+    reset|clear|default) ccenv__reset_defaults ;;
     version)   printf '%s\n' "${CCENV_VERSION:-dev}" ;;
     current)   printf '%s\n' "${CLAUDE_ENV_ACTIVE:-$CLAUDE_ENV_DEFAULT}" ;;
     help|-h|--help) ccenv__print_help ;;
@@ -791,12 +800,12 @@ if [ -z "${CLAUDE_ENV_ACTIVE:-}" ]; then
     :
   else
     if [ -n "$saved_env" ]; then
-      printf 'ccenv: failed to restore saved environment "%s", falling back to default\n' "$saved_env" >&2
+      printf 'ccenv: failed to restore saved environment "%s", falling back to %s\n' "$saved_env" "$CLAUDE_ENV_DEFAULT" >&2
     fi
     if ! ccenv__use "$CLAUDE_ENV_DEFAULT" >/dev/null 2>&1; then
       printf 'ccenv: failed to apply default environment "%s"; clearing managed variables\n' "$CLAUDE_ENV_DEFAULT" >&2
       ccenv__unset_managed
-      export CLAUDE_ENV_ACTIVE="default"
+      export CLAUDE_ENV_ACTIVE="$CLAUDE_ENV_DEFAULT"
     fi
   fi
   unset saved_env

@@ -31,7 +31,6 @@ ccenv_globals() {
 # Apply an environment by name. Return non-zero for unknown.
 ccenv_apply_env() {
   local env_name="$1"
-  [ "$env_name" = "default" ] && return 0
 
   local env_file=""
   env_file="$(ccenv__env_file_for "$env_name" 2>/dev/null || true)"

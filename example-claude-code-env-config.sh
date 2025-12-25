@@ -3,8 +3,8 @@
 # User environment definitions for claude-code-env-switcher.
 # Replace the placeholder tokens/URLs in your .env.cc.<provider> files.
 
-# Keep the default environment pointed at Anthropic unless you override it before sourcing.
-: "${CLAUDE_ENV_DEFAULT:=anthropic}"
+# Optional: set the default environment name (use "default" for base env files only).
+# : "${CLAUDE_ENV_DEFAULT:=anthropic}"
 
 # Optional: override where .env.cc files live.
 # CCENV_ENV_DIR="$HOME/.claude/envs"
@@ -65,7 +65,6 @@ ccenv_globals() {
 # Apply an environment by name. Return non-zero for unknown.
 ccenv_apply_env() {
   local env_name="$1"
-  [ "$env_name" = "default" ] && return 0
 
   local env_file=""
   env_file="$(ccenv__env_file_for "$env_name" 2>/dev/null || true)"
