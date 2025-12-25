@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 
 # User environment definitions for claude-code-env-switcher.
-# Environments live in .env.<provider> files next to this config by default.
-# Set CCENV_DISPLAY_NAME in a .env.<provider> file to customize menu labels.
+# Environments live in .env.cc.<provider> files next to this config by default.
+# Optional shared defaults go into .env.cc, with .env as a fallback when it
+# contains CCENV_ or ANTHROPIC_ variables.
+# Set CCENV_DISPLAY_NAME in a .env.cc.<provider> file to customize menu labels.
 
-# Optional: override where .env.<provider> files live.
+# Optional: override where .env.cc files live.
 # CCENV_ENV_DIR="$HOME/.claude/envs"
 
-# Vars to clear on every switch (include vars you set in .env.* files).
+# Vars to clear on every switch (include vars you set in .env.cc* files).
 typeset -a CCENV_MANAGED_VARS
 CCENV_MANAGED_VARS=(
   ANTHROPIC_AUTH_TOKEN
@@ -28,17 +30,11 @@ ccenv_globals() {
 
 # Apply an environment by name. Return non-zero for unknown.
 ccenv_apply_env() {
-  local name="$1"
-  [ "$name" = "default" ] && return 0
+  local env_name="$1"
+  [ "$env_name" = "default" ] && return 0
 
-  local dir file had_allexport=0
-  dir="${CCENV_ENV_DIR:-$(cd -P -- "$(dirname -- "$CCENV_ENV_FILE_PICKED")" 2>/dev/null && pwd)}"
-  file="$dir/.env.$name"
-  [ -r "$file" ] || return 2
-
-  case $- in *a*) had_allexport=1;; esac
-  set -a
-  # shellcheck disable=SC1090
-  . "$file"
-  [ "$had_allexport" -eq 0 ] && set +a
+  local env_file=""
+  env_file="$(ccenv__env_file_for "$env_name" 2>/dev/null || true)"
+  [ -r "$env_file" ] || return 2
+  ccenv__source_env_file "$env_file" || return 2
 }

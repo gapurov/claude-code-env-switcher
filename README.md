@@ -14,10 +14,11 @@ echo '[[ -r ~/.claude/claude-code-env-switcher.sh ]] && source ~/.claude/claude-
 
 # Create your env config (recommended global path; project-local ./claude-code-env-config.sh also works):
 cp claude-code-env-config.sh ~/.claude/claude-code-env-config.sh
-# Create one or more .env.<provider> files next to it (or set CCENV_ENV_DIR).
-# Example templates live in this repo as .env.<provider>.example:
-cp .env.anthropic.example ~/.claude/.env.anthropic
-chmod 600 ~/.claude/.env.anthropic
+# Create one or more .env.cc.<provider> files next to it (or set CCENV_ENV_DIR).
+# Optional shared defaults go into .env.cc.
+# Example templates live in this repo as .env.cc.<provider>.example:
+cp .env.cc.anthropic.example ~/.claude/.env.cc.anthropic
+chmod 600 ~/.claude/.env.cc.anthropic
 
 # Optional: customize (set in your shell rc before sourcing)
 # export CLAUDE_ENV_DEFAULT=default       # name of the default environment
@@ -27,7 +28,7 @@ chmod 600 ~/.claude/.env.anthropic
 ## Use it
 
 ```bash
-ccenv list # show environments (from .env.* files)
+ccenv list # show environments (from .env.cc.* files)
 ccenv       # with fzf installed: interactive menu to pick a command
 ccenv use   # with fzf installed: interactive env picker (includes --local)
 ccenv -e ./project/claude-code-env-config.sh use anthropic # use a custom config path just for this shell
@@ -39,14 +40,15 @@ ccenv version # print script version
 ccenv current # print active env name
 ```
 
+Env lookup uses the current directory when it has any `.env`, `.env.cc`, or `.env.cc.<provider>` files; otherwise it falls back to the directory containing `claude-code-env-config.sh` (or `CCENV_ENV_DIR` when set). Within that directory, files apply in this order: `.env` (only if it contains `ANTHROPIC_` or `CCENV_` variables), then `.env.cc`, then `.env.cc.<provider>`, so the most specific file wins.
+
 ### Included sample environments
 
-The bundled `example-claude-code-env-config.sh` and `.env.<provider>.example` files include templates for several Anthropic-compatible providers:
+The bundled `example-claude-code-env-config.sh` and `.env.cc.<provider>.example` files include templates for several Anthropic-compatible providers:
 
 - `anthropic`: standard Anthropic endpoint (`https://api.anthropic.com`).
 - `GLM-4.7`: Zhipu's GLM proxy (`https://api.z.ai/api/anthropic`) with GLM model defaults.
 - `deepseek`: DeepSeek proxy (`https://api.deepseek.com/anthropic`).
-- `openrouter`: OpenRouter Anthropic-compatible endpoint (`https://openrouter.ai/api/anthropic`).
 - `minimax`: MiniMax Anthropic-compatible endpoint (`https://api.minimax.io/anthropic`) with `MiniMax-M2.1` set for all Claude model variants, a longer timeout (`API_TIMEOUT_MS=3000000`), and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
 
 ### Options

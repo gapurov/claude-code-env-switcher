@@ -13,7 +13,7 @@
 #   - CCENV_MANAGED_VARS     : list/array of vars to clear on switch
 #   - ccenv_globals()        : optional hook run before each env apply
 #   - ccenv_apply_env <name> : required function; returns non-zero if unknown
-# If CCENV_ENV_NAMES is not set, names are auto-discovered from .env.* files
+# If CCENV_ENV_NAMES is not set, names are auto-discovered from .env.cc.* files
 # in CCENV_ENV_DIR or alongside the config file.
 
 # ----------------------- user-tunable knobs (safe defaults) -------------------
@@ -87,20 +87,26 @@ ccenv__global_env_dir() {
   [ -n "$env_directory" ] && [ -d "$env_directory" ] && printf '%s\n' "$env_directory"
 }
 
-ccenv__list_env_files() {
+ccenv__list_provider_files() {
   local env_directory="$1"
   [ -z "$env_directory" ] && return 0
   if command -v fd >/dev/null 2>&1; then
-    fd -H -I -t f -g '.env.*' -E '*.example' -d 1 "$env_directory" -x basename -a {} 2>/dev/null | LC_ALL=C sort
+    fd -H -I -t f -g '.env.cc.*' -E '*.example' -d 1 "$env_directory" -x basename -a {} 2>/dev/null | LC_ALL=C sort
   else
-    find "$env_directory" -maxdepth 1 -type f -name '.env.*' ! -name '*.example' -print 2>/dev/null | sed 's#.*/##' | LC_ALL=C sort
+    find "$env_directory" -maxdepth 1 -type f -name '.env.cc.*' ! -name '*.example' -print 2>/dev/null | sed 's#.*/##' | LC_ALL=C sort
   fi
 }
 
 ccenv__dir_has_env_files() {
   local env_directory="$1" found_env_file=""
   [ -z "$env_directory" ] && return 1
-  if ccenv__list_env_files "$env_directory" | { read -r found_env_file; }; then
+  if ccenv__env_fallback_file_for_dir "$env_directory" >/dev/null 2>&1; then
+    return 0
+  fi
+  if [ -r "$env_directory/.env.cc" ]; then
+    return 0
+  fi
+  if ccenv__list_provider_files "$env_directory" | { read -r found_env_file; }; then
     [ -n "$found_env_file" ] && return 0
   fi
   return 1
@@ -114,36 +120,63 @@ ccenv__local_env_dir() {
   fi
 }
 
-ccenv__env_dirs() {
-  local local_env_directory global_env_directory
+ccenv__active_env_dir() {
+  local local_env_directory=""
   local_env_directory="$(ccenv__local_env_dir 2>/dev/null || true)"
-  global_env_directory="$(ccenv__global_env_dir 2>/dev/null || true)"
-  [ -n "$local_env_directory" ] && printf '%s\n' "$local_env_directory"
-  if [ -n "$global_env_directory" ] && [ "$global_env_directory" != "$local_env_directory" ]; then
-    printf '%s\n' "$global_env_directory"
-  fi
-}
-
-ccenv__env_dir_for_name() {
-  local env_name="$1" local_env_directory global_env_directory
-  local_env_directory="$(ccenv__local_env_dir 2>/dev/null || true)"
-  if [ -n "$local_env_directory" ] && [ -r "$local_env_directory/.env.$env_name" ]; then
+  if [ -n "$local_env_directory" ]; then
     printf '%s\n' "$local_env_directory"
     return 0
   fi
-  global_env_directory="$(ccenv__global_env_dir 2>/dev/null || true)"
-  if [ -n "$global_env_directory" ] && [ -r "$global_env_directory/.env.$env_name" ]; then
-    printf '%s\n' "$global_env_directory"
-    return 0
-  fi
-  return 1
+  ccenv__global_env_dir
 }
 
 ccenv__env_file_for() {
-  local env_name="$1" env_directory
-  env_directory="$(ccenv__env_dir_for_name "$env_name" 2>/dev/null || true)"
+  local env_name="$1" env_directory=""
+  env_directory="$(ccenv__active_env_dir 2>/dev/null || true)"
   [ -z "$env_directory" ] && return 1
-  printf '%s/.env.%s\n' "$env_directory" "$env_name"
+  printf '%s/.env.cc.%s\n' "$env_directory" "$env_name"
+}
+
+ccenv__env_fallback_file_for_dir() {
+  local env_directory="$1" env_file=""
+  [ -z "$env_directory" ] && return 1
+  env_file="$env_directory/.env"
+  [ -r "$env_file" ] || return 1
+  ccenv__env_file_has_cc_vars "$env_file" >/dev/null 2>&1 || return 1
+  printf '%s\n' "$env_file"
+}
+
+ccenv__env_file_has_cc_vars() {
+  local env_file="$1"
+  [ -r "$env_file" ] || return 1
+  awk '
+    /^[[:space:]]*(export[[:space:]]+)?(ANTHROPIC_|CCENV_)/ { found=1; exit }
+    END { exit found ? 0 : 1 }
+  ' "$env_file" 2>/dev/null
+}
+
+ccenv__source_env_file() {
+  local env_file="$1" had_allexport=0
+  [ -r "$env_file" ] || return 1
+  case $- in *a*) had_allexport=1;; esac
+  set -a
+  # shellcheck disable=SC1090
+  . "$env_file"
+  [ "$had_allexport" -eq 0 ] && set +a
+}
+
+ccenv__apply_base_env_files() {
+  local env_directory="" env_file=""
+  env_directory="$(ccenv__active_env_dir 2>/dev/null || true)"
+  [ -z "$env_directory" ] && return 0
+  env_file="$(ccenv__env_fallback_file_for_dir "$env_directory" 2>/dev/null || true)"
+  if [ -n "$env_file" ]; then
+    ccenv__source_env_file "$env_file" || true
+  fi
+  env_file="$env_directory/.env.cc"
+  if [ -r "$env_file" ]; then
+    ccenv__source_env_file "$env_file" || true
+  fi
 }
 
 ccenv__display_name_for() {
@@ -518,16 +551,11 @@ ccenv__each_envname() {
     ccenv__iterate_array CCENV_ENV_NAMES
     return 0
   fi
-  local env_directory
-  {
-    while IFS= read -r env_directory; do
-      [ -z "$env_directory" ] && continue
-      ccenv__list_env_files "$env_directory"
-    done <<EOF
-$(ccenv__env_dirs)
-EOF
-  } | awk '
-    { sub(/^\.env\./, "", $0); if ($0 != "" && !seen[$0]++) print }
+  local env_directory=""
+  env_directory="$(ccenv__active_env_dir 2>/dev/null || true)"
+  [ -z "$env_directory" ] && return 0
+  ccenv__list_provider_files "$env_directory" | awk '
+    { sub(/^\.env\.cc\./, "", $0); if ($0 != "") print }
   '
 }
 
@@ -642,6 +670,7 @@ ccenv__use() {
   if command -v ccenv_globals >/dev/null 2>&1; then ccenv_globals || true; fi
 
   if [ "$name" != "default" ]; then
+    ccenv__apply_base_env_files
     if ! command -v ccenv_apply_env >/dev/null 2>&1; then
       ccenv__error "$CCENV_ERR_FILE_NOT_FOUND" "missing ccenv_apply_env in config: $(ccenv__resolve_env_file 2>/dev/null || printf '?')"
       return $CCENV_ERR_FILE_NOT_FOUND

@@ -4,5 +4,6 @@ claude-env-sets.sh
 
 # Current patterns
 .claude-code-env-global-active
-.env.*
-!.env.*.example
+.env
+.env.cc*
+!.env.cc*.example
