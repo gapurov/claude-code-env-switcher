@@ -179,33 +179,40 @@ ccenv__apply_base_env_files() {
   fi
 }
 
-ccenv__display_name_for() {
-  local env_name="$1" env_file raw_display_name trimmed_display_name
-  env_file="$(ccenv__env_file_for "$env_name" 2>/dev/null || true)"
-  [ -r "$env_file" ] || return 0
-  raw_display_name="$(awk '
-    /^[[:space:]]*(export[[:space:]]+)?CCENV_DISPLAY_NAME[[:space:]]*=/ {
-      sub(/^[[:space:]]*(export[[:space:]]+)?CCENV_DISPLAY_NAME[[:space:]]*=/, "");
+ccenv__read_env_var_from_file() {
+  local env_file="$1" var_name="$2" raw_value trimmed_value
+  [ -r "$env_file" ] || return 1
+  raw_value="$(awk -v var="$var_name" '
+    $0 ~ "^[[:space:]]*(export[[:space:]]+)?" var "[[:space:]]*=" {
+      sub(/^[[:space:]]*(export[[:space:]]+)?[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=/, "");
       print; exit
     }' "$env_file" 2>/dev/null)"
-  [ -z "$raw_display_name" ] && return 0
-  trimmed_display_name="${raw_display_name#"${raw_display_name%%[![:space:]]*}"}"
-  trimmed_display_name="${trimmed_display_name%"${trimmed_display_name##*[![:space:]]}"}"
-  case "$trimmed_display_name" in
-    \"*\") trimmed_display_name="${trimmed_display_name#\"}"; trimmed_display_name="${trimmed_display_name%\"}";;
-    \'*\') trimmed_display_name="${trimmed_display_name#\'}"; trimmed_display_name="${trimmed_display_name%\'}";;
+  [ -z "$raw_value" ] && return 1
+  trimmed_value="${raw_value#"${raw_value%%[![:space:]]*}"}"
+  trimmed_value="${trimmed_value%"${trimmed_value##*[![:space:]]}"}"
+  case "$trimmed_value" in
+    \"*\") trimmed_value="${trimmed_value#\"}"; trimmed_value="${trimmed_value%\"}";;
+    \'*\') trimmed_value="${trimmed_value#\'}"; trimmed_value="${trimmed_value%\'}";;
   esac
-  [ -n "$trimmed_display_name" ] && printf '%s\n' "$trimmed_display_name"
+  [ -n "$trimmed_value" ] && printf '%s\n' "$trimmed_value"
 }
 
 ccenv__label_for() {
-  local env_name="$1" display_name
-  display_name="$(ccenv__display_name_for "$env_name")"
-  if [ -n "$display_name" ] && [ "$display_name" != "$env_name" ]; then
-    printf '%s (%s)\n' "$display_name" "$env_name"
-  else
-    printf '%s\n' "$env_name"
+  local env_name="$1" env_file display_name model_name
+  env_file="$(ccenv__env_file_for "$env_name" 2>/dev/null || true)"
+  if [ -r "$env_file" ]; then
+    display_name="$(ccenv__read_env_var_from_file "$env_file" "CCENV_DISPLAY_NAME" 2>/dev/null || true)"
+    if [ -n "$display_name" ]; then
+      printf '%s\n' "$display_name"
+      return 0
+    fi
+    model_name="$(ccenv__read_env_var_from_file "$env_file" "ANTHROPIC_MODEL" 2>/dev/null || true)"
+    if [ -n "$model_name" ]; then
+      printf '%s\n' "$model_name"
+      return 0
+    fi
   fi
+  return 0
 }
 
 CCENV__CONFIG_PATH=""
