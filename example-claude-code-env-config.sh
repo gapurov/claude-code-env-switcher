@@ -17,14 +17,14 @@
 #   ANTHROPIC_BASE_URL="https://api.anthropic.com"
 #   ANTHROPIC_AUTH_TOKEN="sk-ant-REPLACE_ME"
 #
-# Example .env.cc.GLM-4.7.example (copy to .env.cc.GLM-4.7):
-#   CCENV_DISPLAY_NAME="GLM-4.7"
+# Example .env.cc.GLM-5.example (copy to .env.cc.GLM-5):
+#   CCENV_DISPLAY_NAME="GLM-5"
 #   ANTHROPIC_BASE_URL="https://api.z.ai/api/anthropic"
 #   ANTHROPIC_AUTH_TOKEN="sk-glm-api-token"
-#   ANTHROPIC_MODEL="GLM-4.7"
-#   ANTHROPIC_DEFAULT_HAIKU_MODEL="GLM-4.5-Air"
-#   ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-4.7"
-#   ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-4.7"
+#   ANTHROPIC_MODEL="GLM-5"
+#   ANTHROPIC_DEFAULT_HAIKU_MODEL="GLM-5"
+#   ANTHROPIC_DEFAULT_SONNET_MODEL="GLM-5"
+#   ANTHROPIC_DEFAULT_OPUS_MODEL="GLM-5"
 #
 # Example .env.cc.deepseek.example (copy to .env.cc.deepseek):
 #   CCENV_DISPLAY_NAME="DeepSeek"

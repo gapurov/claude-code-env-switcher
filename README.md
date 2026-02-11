@@ -47,7 +47,7 @@ Env lookup uses the current directory when it has any `.env`, `.env.cc`, or `.en
 The bundled `example-claude-code-env-config.sh` and `.env.cc.<provider>.example` files include templates for several Anthropic-compatible providers:
 
 - `anthropic`: standard Anthropic endpoint (`https://api.anthropic.com`).
-- `GLM-4.7`: Zhipu's GLM proxy (`https://api.z.ai/api/anthropic`) with GLM model defaults.
+- `GLM-5`: Zhipu's GLM proxy (`https://api.z.ai/api/anthropic`) with GLM model defaults.
 - `deepseek`: DeepSeek proxy (`https://api.deepseek.com/anthropic`).
 - `minimax`: MiniMax Anthropic-compatible endpoint (`https://api.minimax.io/anthropic`) with `MiniMax-M2.1` set for all Claude model variants, a longer timeout (`API_TIMEOUT_MS=3000000`), and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`.
 
